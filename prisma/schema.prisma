@@ -9,15 +9,87 @@ datasource db {
 }
 
 // =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UF {
+  AC
+  AL
+  AM
+  AP
+  BA
+  CE
+  DF
+  ES
+  GO
+  MA
+  MG
+  MS
+  MT
+  PA
+  PB
+  PE
+  PI
+  PR
+  RJ
+  RN
+  RO
+  RR
+  RS
+  SC
+  SE
+  SP
+  TO
+}
+
+enum TipoGD {
+  GD1
+  GD2
+  GD3
+}
+
+enum LocalInstalacao {
+  telhado
+  solo
+}
+
+enum StatusUsina {
+  em_implantacao
+  operacional
+  manutencao
+  desativada
+}
+
+enum TipoProcesso {
+  judicial
+  administrativo
+}
+
+enum StatusManutencao {
+  pendente
+  em_andamento
+  concluida
+}
+
+enum TipoOrcamento {
+  despesa_direta
+  outro
+}
+
+enum StatusEntidade {
+  ativo
+  inativo
+}
+
+// =============================================================================
 // CORE
 // =============================================================================
 
-/// Filial = "Usinas Relatório.json" (465 rows).
-/// Apesar do nome do JSON, são as filiais consumidoras (UC, distribuidora, grupo
-/// tarifário). Referenciadas por código (`Filial: "1902"`) em outros módulos.
+/// Filial — unidade consumidora (UC, distribuidora, grupo tarifário). 465 rows.
+/// JSON Zoho atual: "Usinas Relatório.json" (nome confuso na origem).
 model Filial {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique // idempotência do seed contra a fonte legada
 
   codigo                    String?
   cd                        String?
@@ -27,7 +99,7 @@ model Filial {
   uc2                       String?
   uc3                       String?
   municipio                 String?
-  uf                        String?
+  uf                        UF?
   senha                     String?
   usuario                   String?
   grupo                     String?
@@ -36,55 +108,74 @@ model Filial {
   filialClimatizada         String?
   dataClimatizacaoPlanejada DateTime?
 
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
   usinas                  Usina[]
   consumos                Consumo[]
   fornecedoresAbrangencia Fornecedor[]
 
   @@index([codigo])
+  @@index([cnpj])
+  @@index([uf])
+  @@index([deletedAt])
 }
 
-/// Usina = "Cadástro de usinas Relatório.json" (18 rows). Usinas geradoras solares.
+/// Usina geradora solar. 18 rows. Renomeado conforme BRIEF: kWp → kW.
 model Usina {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
-  nome              String?
-  ccUsinas          String?
-  tipo              String?
-  tipoGd            String?
-  cnpj              String?
-  uc                String?
-  potenciaKwp       Decimal?  @db.Decimal(10, 2)
-  potenciaKwp1      Decimal?  @db.Decimal(10, 2)
-  metaKwhMes        Int?
-  inicioOperacao    DateTime?
-  autoProdutora     String?
-  quantasFlAtende   Int?
-  municipio         String?
-  uf                String?
-  investimentoTotal Decimal?  @db.Decimal(14, 2)
-  documentosProjeto String?
+  nome                String
+  ccUsinas            String?
+  localInstalacao     LocalInstalacao? // antes era `tipo`
+  tipoGd              TipoGD?
+  cnpj                String?
+  uc                  String?
+  potenciaInstaladaKw Decimal?         @db.Decimal(10, 2) // antes "Pot_ncia_kWp"
+  potenciaProjetadaKw Decimal?         @db.Decimal(10, 2) // antes "Pot_ncia_kWp1"
+  metaKwhMes          Int? // energia mensal: kWh, ok
+  inicioOperacao      DateTime?
+  autoProdutora       Boolean?
+  quantasFlAtende     Int?
+  municipio           String?
+  uf                  UF?
+  investimentoTotal   Decimal?         @db.Decimal(15, 2)
+  documentosProjeto   String?
+  status              StatusUsina      @default(operacional)
 
-  filial          Filial? @relation(fields: [filialId], references: [id])
-  filialId        Int?
+  filial          Filial? @relation(fields: [filialId], references: [id], onDelete: Restrict)
+  filialId        String?
   filialCodigoRaw String?
 
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
   geracoes           Geracao[]
-  vendasKwhMes       VendaKwhMes[]
+  vendasKwh          VendaKwh[]
   orcamentos         Orcamento[]
   cronogramasLimpeza CronogramaLimpeza[]
   manutencoesPrev    ManutencaoPreventiva[]
+  consertos          ConsertoEquipamento[]
+  manutencoesCorr    ManutencaoCorretiva[]
+  licencas           Licenca[]
 
   @@index([nome])
+  @@index([cnpj])
+  @@index([filialId])
+  @@index([status])
+  @@index([deletedAt])
 }
 
 model Fornecedor {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
-  nome              String?
+  nome              String
   cnpj              String?
-  status            String?
+  status            StatusEntidade @default(ativo)
   escopoServico     String?
   inicioPrestacao   DateTime?
   terminoPrestacao  DateTime?
@@ -92,9 +183,21 @@ model Fornecedor {
   anexoContrato     String?
   abrangenciaUsinas String?
 
-  abrangenciaFilial    Filial? @relation(fields: [abrangenciaFilialId], references: [id])
-  abrangenciaFilialId  Int?
+  abrangenciaFilial    Filial? @relation(fields: [abrangenciaFilialId], references: [id], onDelete: Restrict)
+  abrangenciaFilialId  String?
   abrangenciaFilialRaw String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  consertos       ConsertoEquipamento[]
+  manutencoesCorr ManutencaoCorretiva[]
+
+  @@index([cnpj])
+  @@index([status])
+  @@index([abrangenciaFilialId])
+  @@index([deletedAt])
 }
 
 // =============================================================================
@@ -102,53 +205,70 @@ model Fornecedor {
 // =============================================================================
 
 model Geracao {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
   ano         Int?
   mes         String?
   metaMensal  Decimal? @db.Decimal(12, 2)
   metaGeracao Decimal? @db.Decimal(12, 2)
 
-  usina        Usina?  @relation(fields: [usinaId], references: [id])
-  usinaId      Int?
+  usina        Usina?  @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
   nomeUsinaRaw String?
 
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
   dias GeracaoDia[]
+
+  @@index([usinaId])
+  @@index([ano, mes])
+  @@index([deletedAt])
 }
 
-/// Geração diária (Single_Line, Single_Line1..Single_Line30 do JSON).
+/// Geração diária. Value-object filho de Geracao — `Cascade` intencional
+/// (não é entidade de negócio, não faz sentido sem a Geracao pai).
 model GeracaoDia {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(cuid())
   geracao   Geracao  @relation(fields: [geracaoId], references: [id], onDelete: Cascade)
-  geracaoId Int
+  geracaoId String
   dia       Int
   kwh       Decimal? @db.Decimal(12, 2)
 
   @@unique([geracaoId, dia])
+  @@index([geracaoId])
 }
 
-/// Venda de KWh, normalizado por mês a partir das colunas wide do JSON.
-model VendaKwhMes {
-  id     Int    @id @default(autoincrement())
-  zohoId String
+/// Venda de KWh — uma linha por usina por mês (wide-to-long aplicado no seed).
+model VendaKwh {
+  id     String  @id @default(cuid())
+  zohoId String?
 
   ano           Int
   mes           String
   kwhVendidos   Decimal? @db.Decimal(12, 2)
-  valorReais    Decimal? @db.Decimal(14, 2)
+  valorReais    Decimal? @db.Decimal(15, 2)
   notaFiscalUrl String?
 
-  usina        Usina?  @relation(fields: [usinaId], references: [id])
-  usinaId      Int?
+  usina        Usina?  @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
   nomeUsinaRaw String?
 
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
   @@unique([zohoId, ano, mes])
+  @@index([usinaId])
+  @@index([ano, mes])
+  @@index([deletedAt])
 }
 
 model Consumo {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
   ano               Int?
   mes               String?
@@ -157,27 +277,36 @@ model Consumo {
   consumoKwhFp      Decimal? @db.Decimal(12, 2)
   consumoTotal      Decimal? @db.Decimal(12, 2)
   injecaoRecebida   Decimal? @db.Decimal(12, 2)
-  multasJurosAtraso Decimal? @db.Decimal(12, 2)
-  outrasMultas      Decimal? @db.Decimal(12, 2)
-  valor             Decimal? @db.Decimal(14, 2)
-  valor1            Decimal? @db.Decimal(14, 2)
-  valor2            Decimal? @db.Decimal(14, 2)
-  valor3            Decimal? @db.Decimal(14, 2)
-  valorTotalFatura  Decimal? @db.Decimal(14, 2)
+  multasJurosAtraso Decimal? @db.Decimal(15, 2)
+  outrasMultas      Decimal? @db.Decimal(15, 2)
+  valor             Decimal? @db.Decimal(15, 2)
+  valor1            Decimal? @db.Decimal(15, 2)
+  valor2            Decimal? @db.Decimal(15, 2)
+  valor3            Decimal? @db.Decimal(15, 2)
+  valorTotalFatura  Decimal? @db.Decimal(15, 2)
   statusAnexo       String?
   arquivoFatura     String?
   municipio         String?
 
-  filial          Filial? @relation(fields: [filialId], references: [id])
-  filialId        Int?
+  filial          Filial? @relation(fields: [filialId], references: [id], onDelete: Restrict)
+  filialId        String?
   filialCodigoRaw String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  validacoes ValidacaoFatura[]
+
+  @@index([filialId])
+  @@index([ano, mes])
+  @@index([uc])
+  @@index([deletedAt])
 }
 
-/// "Filial" do JSON de injeção é descrição livre ("Auto Posto 04900"),
-/// não o código numérico. Mantido como string sem FK.
 model Injecao {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
   ano             Int?
   mes             String?
@@ -187,31 +316,47 @@ model Injecao {
   consumoKwhP     Decimal? @db.Decimal(12, 2)
   consumoKwhP1    Decimal? @db.Decimal(12, 2)
   consumoTotalKwh Decimal? @db.Decimal(12, 2)
-  valor           Decimal? @db.Decimal(14, 2)
-  valor1          Decimal? @db.Decimal(14, 2)
-  valor2          Decimal? @db.Decimal(14, 2)
+  valor           Decimal? @db.Decimal(15, 2)
+  valor1          Decimal? @db.Decimal(15, 2)
+  valor2          Decimal? @db.Decimal(15, 2)
   municipio       String?
   anexoFechamento String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([ano, mes])
+  @@index([uc])
+  @@index([deletedAt])
 }
 
 model Orcamento {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
   mes                 String?
-  tipo                String?
+  tipo                TipoOrcamento?
   naturezaGasto       String?
   detalhamento        String?
   equipamentos        String?
-  realEquipamentos    Decimal? @db.Decimal(14, 2)
-  realViagensEstadias Decimal? @db.Decimal(14, 2)
-  realUsoConsumo      Decimal? @db.Decimal(14, 2)
-  usoConsumo          Decimal? @db.Decimal(14, 2)
+  realEquipamentos    Decimal?       @db.Decimal(15, 2)
+  realViagensEstadias Decimal?       @db.Decimal(15, 2)
+  realUsoConsumo      Decimal?       @db.Decimal(15, 2)
+  usoConsumo          Decimal?       @db.Decimal(15, 2)
   anexosDetalhamento  String?
 
-  usina        Usina?  @relation(fields: [usinaId], references: [id])
-  usinaId      Int?
+  usina        Usina?  @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
   nomeUsinaRaw String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([usinaId])
+  @@index([mes])
+  @@index([deletedAt])
 }
 
 // =============================================================================
@@ -219,46 +364,66 @@ model Orcamento {
 // =============================================================================
 
 model CronogramaLimpeza {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
   realizado   String?
-  statusGeral String?
+  statusGeral StatusManutencao @default(pendente)
 
-  usina        Usina?  @relation(fields: [usinaId], references: [id])
-  usinaId      Int?
+  usina        Usina?  @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
   nomeUsinaRaw String?
 
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
   itens LimpezaItem[]
+
+  @@index([usinaId])
+  @@index([statusGeral])
+  @@index([deletedAt])
 }
 
+/// Value-object filho de CronogramaLimpeza — `Cascade` intencional.
 model LimpezaItem {
-  id            Int               @id @default(autoincrement())
+  id            String            @id @default(cuid())
   cronograma    CronogramaLimpeza @relation(fields: [cronogramaId], references: [id], onDelete: Cascade)
-  cronogramaId  Int
+  cronogramaId  String
   ordem         Int
   dataPlanejada DateTime?
   dataConclusao DateTime?
-  status        String?
+  status        StatusManutencao?
   fotoUrl       String?
 
   @@unique([cronogramaId, ordem])
+  @@index([cronogramaId])
+  @@index([dataPlanejada])
 }
 
 model ManutencaoPreventiva {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
-  status               String?
+  status               StatusManutencao @default(pendente)
   dataExecucao         DateTime?
   dataConclusao        DateTime?
   laudoTecnico         String?
   fotosUsina           String?
   checklistVerificacao String?
 
-  usina        Usina?  @relation(fields: [usinaId], references: [id])
-  usinaId      Int?
+  usina        Usina?  @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
   nomeUsinaRaw String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([usinaId])
+  @@index([status])
+  @@index([dataExecucao])
+  @@index([deletedAt])
 }
 
 // =============================================================================
@@ -266,17 +431,128 @@ model ManutencaoPreventiva {
 // =============================================================================
 
 model ProcessoJuridico {
-  id     Int    @id @default(autoincrement())
-  zohoId String @unique
+  id     String  @id @default(cuid())
+  zohoId String? @unique
 
-  tipo            String?
+  tipo            TipoProcesso?
   parteAdversa    String?
   pleito          String?
   dataProtocolo   DateTime?
   fornecedor      String?
   evolucaoJaneiro String?
+  /// Lista textual ("Gazin NAS II- Filial 265 - MS") — pode citar múltiplas
+  /// usinas. Resolução pra FK fica para etapa futura.
+  nomeUsinasRaw   String?
 
-  /// Lista textual ("Gazin NAS II- Filial 265 - MS") — não resolvida pra FK
-  /// pois pode citar múltiplas usinas. Resolução fica para etapa futura.
-  nomeUsinasRaw String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([tipo])
+  @@index([dataProtocolo])
+  @@index([deletedAt])
+}
+
+// =============================================================================
+// STUBS — schema preliminar, expandir quando JSON real for fornecido
+// =============================================================================
+
+// STUB — schema preliminar, expandir quando JSON real for fornecido
+model Licenca {
+  id String @id @default(cuid())
+
+  observacao String?
+
+  usina   Usina?  @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([usinaId])
+  @@index([deletedAt])
+}
+
+// STUB — schema preliminar, expandir quando JSON real for fornecido
+model ValidacaoFatura {
+  id String @id @default(cuid())
+
+  observacao String?
+
+  consumo   Consumo? @relation(fields: [consumoId], references: [id], onDelete: Restrict)
+  consumoId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([consumoId])
+  @@index([deletedAt])
+}
+
+// STUB — schema preliminar, expandir quando JSON real for fornecido
+model ItemEstoque {
+  id String @id @default(cuid())
+
+  observacao String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+// STUB — schema preliminar, expandir quando JSON real for fornecido
+model ConsertoEquipamento {
+  id String @id @default(cuid())
+
+  observacao String?
+
+  usina        Usina?      @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
+  fornecedor   Fornecedor? @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  fornecedorId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([usinaId])
+  @@index([fornecedorId])
+  @@index([deletedAt])
+}
+
+// STUB — schema preliminar, expandir quando JSON real for fornecido
+model ManutencaoCorretiva {
+  id String @id @default(cuid())
+
+  observacao String?
+
+  usina        Usina?      @relation(fields: [usinaId], references: [id], onDelete: Restrict)
+  usinaId      String?
+  fornecedor   Fornecedor? @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  fornecedorId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([usinaId])
+  @@index([fornecedorId])
+  @@index([deletedAt])
+}
+
+// STUB — schema preliminar, expandir quando JSON real for fornecido
+model Documento {
+  id String @id @default(cuid())
+
+  observacao String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
 }
