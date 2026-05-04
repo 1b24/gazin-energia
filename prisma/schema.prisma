@@ -173,7 +173,7 @@ model Fornecedor {
   id     String  @id @default(cuid())
   zohoId String? @unique
 
-  nome              String
+  nome              String?
   cnpj              String?
   status            StatusEntidade @default(ativo)
   escopoServico     String?

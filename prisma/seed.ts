@@ -1,16 +1,17 @@
 /**
- * Seed entrypoint. Currently delegates to the raw-JSON importer in
- * `scripts/import-raw.ts`. When proper auth/admin user seeding lands, that goes
- * here too (likely guarded by `SEED_ADMIN_PASSWORD`).
+ * Seed entrypoint. Delega ao importer em `scripts/import-raw.ts`.
+ * Quando auth chegar (Tarefa 5), o admin inicial via `SEED_ADMIN_PASSWORD`
+ * passa a ser criado aqui também.
  */
 import "dotenv/config";
+
 import { createPrismaClient } from "../lib/db";
 import { printSummary, runImport } from "../scripts/import-raw";
 
 async function main() {
   const prisma = createPrismaClient();
   try {
-    const stats = await runImport(prisma);
+    const { stats } = await runImport(prisma);
     printSummary(stats);
   } finally {
     await prisma.$disconnect();
