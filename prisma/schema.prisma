@@ -1,5 +1,4 @@
 // Prisma 7 note: `url` lives in prisma.config.ts, not here.
-// The brief (written for Prisma 5/6) had `url = env("DATABASE_URL")` inside this datasource block.
 
 generator client {
   provider = "prisma-client-js"
@@ -7,4 +6,277 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// =============================================================================
+// CORE
+// =============================================================================
+
+/// Filial = "Usinas Relatório.json" (465 rows).
+/// Apesar do nome do JSON, são as filiais consumidoras (UC, distribuidora, grupo
+/// tarifário). Referenciadas por código (`Filial: "1902"`) em outros módulos.
+model Filial {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  codigo                    String?
+  cd                        String?
+  mercadoLivre              String?
+  percentualAbsorcaoUsp     Decimal?  @db.Decimal(7, 2)
+  uc                        String?
+  uc2                       String?
+  uc3                       String?
+  municipio                 String?
+  uf                        String?
+  senha                     String?
+  usuario                   String?
+  grupo                     String?
+  distribuidora             String?
+  cnpj                      String?
+  filialClimatizada         String?
+  dataClimatizacaoPlanejada DateTime?
+
+  usinas                  Usina[]
+  consumos                Consumo[]
+  fornecedoresAbrangencia Fornecedor[]
+
+  @@index([codigo])
+}
+
+/// Usina = "Cadástro de usinas Relatório.json" (18 rows). Usinas geradoras solares.
+model Usina {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  nome              String?
+  ccUsinas          String?
+  tipo              String?
+  tipoGd            String?
+  cnpj              String?
+  uc                String?
+  potenciaKwp       Decimal?  @db.Decimal(10, 2)
+  potenciaKwp1      Decimal?  @db.Decimal(10, 2)
+  metaKwhMes        Int?
+  inicioOperacao    DateTime?
+  autoProdutora     String?
+  quantasFlAtende   Int?
+  municipio         String?
+  uf                String?
+  investimentoTotal Decimal?  @db.Decimal(14, 2)
+  documentosProjeto String?
+
+  filial          Filial? @relation(fields: [filialId], references: [id])
+  filialId        Int?
+  filialCodigoRaw String?
+
+  geracoes           Geracao[]
+  vendasKwhMes       VendaKwhMes[]
+  orcamentos         Orcamento[]
+  cronogramasLimpeza CronogramaLimpeza[]
+  manutencoesPrev    ManutencaoPreventiva[]
+
+  @@index([nome])
+}
+
+model Fornecedor {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  nome              String?
+  cnpj              String?
+  status            String?
+  escopoServico     String?
+  inicioPrestacao   DateTime?
+  terminoPrestacao  DateTime?
+  idContratoZoho    String?
+  anexoContrato     String?
+  abrangenciaUsinas String?
+
+  abrangenciaFilial    Filial? @relation(fields: [abrangenciaFilialId], references: [id])
+  abrangenciaFilialId  Int?
+  abrangenciaFilialRaw String?
+}
+
+// =============================================================================
+// OPERATIONAL
+// =============================================================================
+
+model Geracao {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  ano         Int?
+  mes         String?
+  metaMensal  Decimal? @db.Decimal(12, 2)
+  metaGeracao Decimal? @db.Decimal(12, 2)
+
+  usina        Usina?  @relation(fields: [usinaId], references: [id])
+  usinaId      Int?
+  nomeUsinaRaw String?
+
+  dias GeracaoDia[]
+}
+
+/// Geração diária (Single_Line, Single_Line1..Single_Line30 do JSON).
+model GeracaoDia {
+  id        Int      @id @default(autoincrement())
+  geracao   Geracao  @relation(fields: [geracaoId], references: [id], onDelete: Cascade)
+  geracaoId Int
+  dia       Int
+  kwh       Decimal? @db.Decimal(12, 2)
+
+  @@unique([geracaoId, dia])
+}
+
+/// Venda de KWh, normalizado por mês a partir das colunas wide do JSON.
+model VendaKwhMes {
+  id     Int    @id @default(autoincrement())
+  zohoId String
+
+  ano           Int
+  mes           String
+  kwhVendidos   Decimal? @db.Decimal(12, 2)
+  valorReais    Decimal? @db.Decimal(14, 2)
+  notaFiscalUrl String?
+
+  usina        Usina?  @relation(fields: [usinaId], references: [id])
+  usinaId      Int?
+  nomeUsinaRaw String?
+
+  @@unique([zohoId, ano, mes])
+}
+
+model Consumo {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  ano               Int?
+  mes               String?
+  uc                String?
+  consumoKwhP       Decimal? @db.Decimal(12, 2)
+  consumoKwhFp      Decimal? @db.Decimal(12, 2)
+  consumoTotal      Decimal? @db.Decimal(12, 2)
+  injecaoRecebida   Decimal? @db.Decimal(12, 2)
+  multasJurosAtraso Decimal? @db.Decimal(12, 2)
+  outrasMultas      Decimal? @db.Decimal(12, 2)
+  valor             Decimal? @db.Decimal(14, 2)
+  valor1            Decimal? @db.Decimal(14, 2)
+  valor2            Decimal? @db.Decimal(14, 2)
+  valor3            Decimal? @db.Decimal(14, 2)
+  valorTotalFatura  Decimal? @db.Decimal(14, 2)
+  statusAnexo       String?
+  arquivoFatura     String?
+  municipio         String?
+
+  filial          Filial? @relation(fields: [filialId], references: [id])
+  filialId        Int?
+  filialCodigoRaw String?
+}
+
+/// "Filial" do JSON de injeção é descrição livre ("Auto Posto 04900"),
+/// não o código numérico. Mantido como string sem FK.
+model Injecao {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  ano             Int?
+  mes             String?
+  uc              String?
+  filialDescricao String?
+  fornecedorRaw   String?
+  consumoKwhP     Decimal? @db.Decimal(12, 2)
+  consumoKwhP1    Decimal? @db.Decimal(12, 2)
+  consumoTotalKwh Decimal? @db.Decimal(12, 2)
+  valor           Decimal? @db.Decimal(14, 2)
+  valor1          Decimal? @db.Decimal(14, 2)
+  valor2          Decimal? @db.Decimal(14, 2)
+  municipio       String?
+  anexoFechamento String?
+}
+
+model Orcamento {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  mes                 String?
+  tipo                String?
+  naturezaGasto       String?
+  detalhamento        String?
+  equipamentos        String?
+  realEquipamentos    Decimal? @db.Decimal(14, 2)
+  realViagensEstadias Decimal? @db.Decimal(14, 2)
+  realUsoConsumo      Decimal? @db.Decimal(14, 2)
+  usoConsumo          Decimal? @db.Decimal(14, 2)
+  anexosDetalhamento  String?
+
+  usina        Usina?  @relation(fields: [usinaId], references: [id])
+  usinaId      Int?
+  nomeUsinaRaw String?
+}
+
+// =============================================================================
+// MANUTENÇÃO
+// =============================================================================
+
+model CronogramaLimpeza {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  realizado   String?
+  statusGeral String?
+
+  usina        Usina?  @relation(fields: [usinaId], references: [id])
+  usinaId      Int?
+  nomeUsinaRaw String?
+
+  itens LimpezaItem[]
+}
+
+model LimpezaItem {
+  id            Int               @id @default(autoincrement())
+  cronograma    CronogramaLimpeza @relation(fields: [cronogramaId], references: [id], onDelete: Cascade)
+  cronogramaId  Int
+  ordem         Int
+  dataPlanejada DateTime?
+  dataConclusao DateTime?
+  status        String?
+  fotoUrl       String?
+
+  @@unique([cronogramaId, ordem])
+}
+
+model ManutencaoPreventiva {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  status               String?
+  dataExecucao         DateTime?
+  dataConclusao        DateTime?
+  laudoTecnico         String?
+  fotosUsina           String?
+  checklistVerificacao String?
+
+  usina        Usina?  @relation(fields: [usinaId], references: [id])
+  usinaId      Int?
+  nomeUsinaRaw String?
+}
+
+// =============================================================================
+// JURÍDICO
+// =============================================================================
+
+model ProcessoJuridico {
+  id     Int    @id @default(autoincrement())
+  zohoId String @unique
+
+  tipo            String?
+  parteAdversa    String?
+  pleito          String?
+  dataProtocolo   DateTime?
+  fornecedor      String?
+  evolucaoJaneiro String?
+
+  /// Lista textual ("Gazin NAS II- Filial 265 - MS") — não resolvida pra FK
+  /// pois pode citar múltiplas usinas. Resolução fica para etapa futura.
+  nomeUsinasRaw String?
 }
