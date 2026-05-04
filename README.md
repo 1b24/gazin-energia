@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gazin Energia — Sistema de Gestão Energética
 
-## Getting Started
+Plataforma interna para cadastro e gestão de usinas, filiais, fornecedores, geração,
+consumo, manutenção, jurídico, estoque e documentos.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router, TypeScript strict, Tailwind, ESLint)
+- **Prisma** + `@prisma/client`
+- **NextAuth.js v5** (`next-auth@beta`)
+- **shadcn/ui** (tema neutro)
+- **TanStack Table**, **React Hook Form**, **Zod**, **nuqs**
+- **Recharts**, **decimal.js**, **date-fns** (locale `ptBR`), **lucide-react**
+- Scripts: **tsx** • Dev: **prettier**, **prettier-plugin-tailwindcss**
+
+> Nota: o brief original pediu Next.js 15, mas `create-next-app@latest` instalou
+> Next.js 16 (e Prisma 7). O scaffold roda nessas versões.
+
+## Como rodar
 
 ```bash
+git clone <repo>
+cd gazin-energia
+npm install
+cp .env.example .env.local   # preencha DATABASE_URL etc.
+npm run db:push              # aplica o schema
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abra <http://localhost:3000>.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Estrutura de pastas
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/
+  (auth)/login/              login (placeholder)
+  (dashboard)/               shell autenticado — sidebar lê do registry
+    layout.tsx               sidebar + breadcrumbs + main
+    page.tsx                 home (placeholder)
+    <modulos>/page.tsx       uma página por módulo/submódulo
+  api/auth/[...nextauth]/    rota NextAuth (stub)
+  layout.tsx                 root layout
+  globals.css
 
-## Learn More
+components/
+  ui/                        shadcn primitives
+  layout/                    sidebar, breadcrumbs
+  data-table/                criados na Tarefa 3 do BRIEF
+  forms/                     criados depois
+  charts/                    criados depois
 
-To learn more about Next.js, take a look at the following resources:
+lib/
+  modules/registry.ts        FONTE ÚNICA DE VERDADE da navegação
+  modules/types.ts
+  schemas/                   schemas Zod por módulo (criados depois)
+  auth.ts                    stub NextAuth
+  db.ts                      Prisma singleton
+  format.ts                  helpers BR (parse/format de número, data, CNPJ)
+  utils.ts                   cn() do shadcn
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+prisma/
+  schema.prisma              datasource + generator (sem models ainda)
+  seed.ts                    stub
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+scripts/
+  validate-migration.ts      stub
 
-## Deploy on Vercel
+data/
+  raw/                       JSONs exportados do sistema antigo (gitignored)
+  xlsx-backup/               backup XLSX (gitignored)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+types/                       tipos compartilhados
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Como adicionar um novo módulo
+
+A arquitetura é **registry-driven**: navegação, rotas e tabelas leem de
+`lib/modules/registry.ts`. Adicionar um módulo novo deve mexer em poucos lugares.
+
+1. **Adicionar entrada em `lib/modules/registry.ts`** com `id`, `label`, `icon`
+   (nome do `lucide-react`), `basePath`, `prismaModel`, e `submodules` se houver.
+2. **Criar o model em `prisma/schema.prisma`** e rodar `npm run db:migrate`.
+3. **Criar schema Zod em `lib/schemas/<modulo>.ts`** para validação de form/API.
+4. **Criar `app/(dashboard)/<modulo>/page.tsx`** reusando `<EntityPage />`
+   (componente genérico criado na Tarefa 3 do BRIEF).
+5. **Adicionar entrada em `lib/modules/status.ts`** (criado na Tarefa 2 do BRIEF)
+   para tracking de progresso de implementação.
+
+A sidebar e os breadcrumbs já passam a refletir o módulo automaticamente — não
+edite componentes de layout para adicionar entradas.
+
+## Dados legados
+
+`data/raw/` recebe os JSONs exportados do sistema antigo. Não comitar esses
+arquivos — o `.gitignore` já cobre. Os scripts em `scripts/` consomem esses JSONs
+para migração e validação.
+
+## Scripts
+
+- `npm run dev` / `build` / `start` / `lint` / `format`
+- `npm run db:push` / `db:migrate` / `db:studio` / `db:seed` / `db:validate`

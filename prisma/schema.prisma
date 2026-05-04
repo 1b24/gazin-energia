@@ -1,0 +1,10 @@
+// Prisma 7 note: `url` lives in prisma.config.ts, not here.
+// The brief (written for Prisma 5/6) had `url = env("DATABASE_URL")` inside this datasource block.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
