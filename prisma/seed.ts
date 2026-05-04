@@ -3,11 +3,12 @@
  * `scripts/import-raw.ts`. When proper auth/admin user seeding lands, that goes
  * here too (likely guarded by `SEED_ADMIN_PASSWORD`).
  */
-import { PrismaClient } from "@prisma/client";
+import "dotenv/config";
+import { createPrismaClient } from "../lib/db";
 import { printSummary, runImport } from "../scripts/import-raw";
 
 async function main() {
-  const prisma = new PrismaClient();
+  const prisma = createPrismaClient();
   try {
     const stats = await runImport(prisma);
     printSummary(stats);

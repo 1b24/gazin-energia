@@ -9,9 +9,11 @@
  * are logged but never abort the run; the original raw value is preserved on the
  * row in a `*Raw` column for later reconciliation.
  */
-import { PrismaClient } from "@prisma/client";
+import "dotenv/config";
+import type { PrismaClient } from "@prisma/client";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createPrismaClient } from "@/lib/db";
 import {
   mesAbbrPtToNumber,
   nullIfEmpty,
@@ -591,7 +593,7 @@ async function importProcessos(prisma: PrismaClient) {
 
 export async function runImport(prisma?: PrismaClient): Promise<Record<string, Stats>> {
   const owns = !prisma;
-  const client = prisma ?? new PrismaClient();
+  const client = prisma ?? createPrismaClient();
   try {
     // Dependency order: Filial → Usina → everything else.
     await importFiliais(client);

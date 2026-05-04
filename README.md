@@ -18,16 +18,37 @@ consumo, manutenção, jurídico, estoque e documentos.
 
 ## Como rodar
 
+### Opção A — Postgres local sem instalar nada (recomendado p/ dev)
+
+Prisma 7 tem um Postgres embutido. Não precisa Docker nem instalar PG.
+
 ```bash
 git clone <repo>
 cd gazin-energia
 npm install
-cp .env.example .env.local   # preencha DATABASE_URL etc.
-npm run db:push              # aplica o schema
+
+# 1. Sobe o servidor Postgres local em background
+npx prisma dev --detach -n gazin
+
+# 2. Decodifica a URL TCP do servidor (o `prisma+postgres://` HTTP não é
+#    suportado pelo cliente 7.8 atual; precisa do TCP por dentro do api_key)
+node -e "const url=require('child_process').execSync('npx prisma dev ls').toString();const m=/api_key=([A-Za-z0-9_-]+)/.exec(url);const d=JSON.parse(Buffer.from(m[1],'base64url').toString());console.log('DATABASE_URL=\"'+d.databaseUrl+'\"')" > .env
+
+# 3. Schema + dados
+npm run db:push
+npm run db:seed
+npm run db:validate
+
+# 4. App
 npm run dev
 ```
 
-Abra <http://localhost:3000>.
+Abra <http://localhost:3000>. Pra parar o PG depois: `npx prisma dev stop -n gazin`.
+
+### Opção B — Postgres próprio (Docker, Supabase, RDS, etc.)
+
+Coloque a connection string em `.env` (formato `postgres://user:pass@host:port/db`)
+e siga do passo 3.
 
 ## Estrutura de pastas
 

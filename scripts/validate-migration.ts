@@ -8,9 +8,10 @@
  *
  * Exits with code 1 if anything looks off, so it's safe to wire into CI later.
  */
-import { PrismaClient } from "@prisma/client";
+import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createPrismaClient } from "@/lib/db";
 
 const RAW_DIR = path.join(process.cwd(), "data", "raw");
 
@@ -28,7 +29,7 @@ interface Check {
 }
 
 async function main() {
-  const prisma = new PrismaClient();
+  const prisma = createPrismaClient();
   const checks: Check[] = [];
 
   try {
