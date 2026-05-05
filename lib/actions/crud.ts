@@ -27,6 +27,7 @@
  * Audit (Tarefa 6) e RBAC (Tarefa 5) são integrados pelos hooks `onMutation`
  * e `getActor` opcionais — estubados por enquanto.
  */
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
@@ -61,6 +62,8 @@ interface CrudOptions {
   hooks?: CrudHooks;
   /** Default `true`. Stubs ignoram mutate (lança erro). */
   enforceStubBlock?: boolean;
+  /** Path(s) a invalidar via `revalidatePath` após qualquer mutação. */
+  revalidate?: string | string[];
 }
 
 // Tipo opaco para o delegate dinâmico do Prisma (`prisma[modelLower]`).
@@ -92,7 +95,13 @@ export function createCrudActions<S extends z.ZodObject>(
   schema: S,
   opts: CrudOptions = {},
 ) {
-  const { enforceStubBlock = true, hooks: localHooks } = opts;
+  const { enforceStubBlock = true, hooks: localHooks, revalidate } = opts;
+
+  function bustCache() {
+    if (!revalidate) return;
+    const paths = Array.isArray(revalidate) ? revalidate : [revalidate];
+    for (const p of paths) revalidatePath(p);
+  }
 
   function effectiveHooks(): CrudHooks {
     return { ...globalHooks, ...localHooks };
@@ -134,6 +143,7 @@ export function createCrudActions<S extends z.ZodObject>(
     const delegate = delegateFor(prismaModel);
     const created = await delegate.create({ data });
     await audit("create", created.id, null, created);
+    bustCache();
     return created;
   }
 
@@ -144,6 +154,7 @@ export function createCrudActions<S extends z.ZodObject>(
     const before = await delegate.findUnique({ where: { id } });
     const updated = await delegate.update({ where: { id }, data });
     await audit("update", id, before, updated);
+    bustCache();
     return updated;
   }
 
@@ -156,6 +167,7 @@ export function createCrudActions<S extends z.ZodObject>(
       data: { deletedAt: new Date() },
     });
     await audit("soft_delete", id, before, after);
+    bustCache();
     return after;
   }
 
@@ -168,11 +180,13 @@ export function createCrudActions<S extends z.ZodObject>(
       data: { deletedAt: null },
     });
     await audit("restore", id, before, after);
+    bustCache();
     return after;
   }
 
   async function bulkDelete(ids: string[]) {
     ensureNotStub();
+    // softDelete já chama bustCache, mas isso é idempotente.
     for (const id of ids) await softDelete(id);
     return { count: ids.length };
   }
