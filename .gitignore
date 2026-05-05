@@ -48,3 +48,6 @@ yarn-error.log*
 next-env.d.ts
 
 /lib/generated/prisma
+
+# graphify (índice de navegação local — regenerado via `graphify update .`)
+/graphify-out/
