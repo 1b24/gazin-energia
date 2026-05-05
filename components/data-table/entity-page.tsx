@@ -16,7 +16,8 @@ import { useCallback, useState, useTransition, type ReactNode } from "react";
 import type { z } from "zod";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -205,7 +206,9 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
             {actions?.bulkExport && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  render={<Button variant="outline" size="sm" />}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                  )}
                   disabled={pending}
                 >
                   Exportar

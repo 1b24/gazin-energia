@@ -37,12 +37,13 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -102,25 +103,30 @@ export function DataTable<T extends { id?: string }>({
           enableHiding: false,
           size: 32,
           header: ({ table }) => (
-            <Checkbox
-              checked={table.getIsAllPageRowsSelected()}
-              indeterminate={
-                table.getIsSomePageRowsSelected() &&
-                !table.getIsAllPageRowsSelected()
-              }
-              onCheckedChange={(checked: boolean) =>
-                table.toggleAllPageRowsSelected(checked)
-              }
-              aria-label="Selecionar todas"
-            />
+            <div onClick={(e) => e.stopPropagation()} className="flex">
+              <Checkbox
+                checked={table.getIsAllPageRowsSelected()}
+                indeterminate={
+                  table.getIsSomePageRowsSelected() &&
+                  !table.getIsAllPageRowsSelected()
+                }
+                onCheckedChange={(checked: boolean) =>
+                  table.toggleAllPageRowsSelected(checked)
+                }
+                aria-label="Selecionar todas"
+              />
+            </div>
           ),
           cell: ({ row }) => (
-            <Checkbox
-              checked={row.getIsSelected()}
-              onCheckedChange={(checked: boolean) => row.toggleSelected(checked)}
-              aria-label="Selecionar linha"
-              onClick={(e) => e.stopPropagation()}
-            />
+            <div onClick={(e) => e.stopPropagation()} className="flex">
+              <Checkbox
+                checked={row.getIsSelected()}
+                onCheckedChange={(checked: boolean) =>
+                  row.toggleSelected(checked)
+                }
+                aria-label="Selecionar linha"
+              />
+            </div>
           ),
         },
         ...columns,
@@ -217,11 +223,20 @@ export function DataTable<T extends { id?: string }>({
                   className={cn(onRowClick && "cursor-pointer")}
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="whitespace-nowrap">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
+                  {row.getVisibleCells().map((cell) => {
+                    const isSelectCell = cell.column.id === "_select";
+                    return (
+                      <TableCell
+                        key={cell.id}
+                        className="whitespace-nowrap"
+                        onClick={
+                          isSelectCell ? (e) => e.stopPropagation() : undefined
+                        }
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               ))
             ) : (
@@ -304,22 +319,26 @@ function ColumnsMenu<T>({ table }: { table: ReturnType<typeof useReactTable<T>> 
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+      <DropdownMenuTrigger
+        className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+      >
         <Settings2 className="mr-1 h-4 w-4" />
         Colunas
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel>Mostrar colunas</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {hideable.map((c) => (
-          <DropdownMenuCheckboxItem
-            key={c.id}
-            checked={c.getIsVisible()}
-            onCheckedChange={(v) => c.toggleVisibility(!!v)}
-          >
-            {String(c.columnDef.header ?? c.id)}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Mostrar colunas</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {hideable.map((c) => (
+            <DropdownMenuCheckboxItem
+              key={c.id}
+              checked={c.getIsVisible()}
+              onCheckedChange={(v) => c.toggleVisibility(!!v)}
+            >
+              {String(c.columnDef.header ?? c.id)}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

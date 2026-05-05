@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
+import { serializePrisma } from "@/lib/serialize";
 
-import { FiliaisTable } from "./filiais-table";
+import { FiliaisTable, type FilialRow } from "./filiais-table";
 
 export default async function FiliaisPage() {
   const rows = await prisma.filial.findMany({
@@ -16,5 +17,6 @@ export default async function FiliaisPage() {
     orderBy: [{ codigo: "asc" }, { mercadoLivre: "asc" }],
   });
 
-  return <FiliaisTable rows={rows} />;
+  // Decimal/BigInt não atravessam a borda RSC→Client. Converte em number.
+  return <FiliaisTable rows={serializePrisma(rows) as FilialRow[]} />;
 }

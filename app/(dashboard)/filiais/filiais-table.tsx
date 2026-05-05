@@ -10,6 +10,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Filial } from "@prisma/client";
 
+import type { Serialized } from "@/lib/serialize";
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,9 @@ import { filialFormFields, filialSchema } from "@/lib/schemas/filial";
 
 import * as actions from "./actions";
 
-export type FilialRow = Filial & {
+// `Serialized<Filial>` reflete a passagem por `serializePrisma()` em page.tsx
+// (Decimal → number, demais tipos preservados).
+export type FilialRow = Serialized<Filial> & {
   _count: { usinas: number; consumos: number; fornecedoresAbrangencia: number };
 };
 
