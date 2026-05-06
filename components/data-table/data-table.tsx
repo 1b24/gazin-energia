@@ -78,6 +78,11 @@ interface DataTableProps<T> {
   selectable?: boolean;
   /** Notificado quando a seleção muda — recebe lista de IDs (chave `id`). */
   onSelectionChange?: (selectedIds: string[]) => void;
+  /**
+   * Visibilidade inicial por coluna — `{ "valor1": false }` esconde a
+   * coluna `valor1` no carregamento; usuário pode reabrir via "Colunas".
+   */
+  initialColumnVisibility?: VisibilityState;
 }
 
 export function DataTable<T extends { id?: string }>({
@@ -91,10 +96,13 @@ export function DataTable<T extends { id?: string }>({
   initialPageSize = 50,
   selectable = true,
   onSelectionChange,
+  initialColumnVisibility,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
+    initialColumnVisibility ?? {},
+  );
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [pageSize, setPageSize] = useState(initialPageSize);
 

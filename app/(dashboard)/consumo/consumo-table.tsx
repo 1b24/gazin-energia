@@ -102,15 +102,47 @@ const columns: ColumnDef<ConsumoRow, unknown>[] = [
         "—"
       ),
   },
+  // --- Consumo (kWh) ---
+  {
+    accessorKey: "consumoKwhP",
+    header: "Consumo P (kWh)",
+    cell: ({ row }) => fmtKwh(row.original.consumoKwhP),
+  },
+  {
+    accessorKey: "consumoKwhFp",
+    header: "Consumo FP (kWh)",
+    cell: ({ row }) => fmtKwh(row.original.consumoKwhFp),
+  },
   {
     accessorKey: "consumoTotal",
-    header: "Consumo (kWh)",
+    header: "Consumo total (kWh)",
     cell: ({ row }) => fmtKwh(row.original.consumoTotal),
   },
   {
     accessorKey: "injecaoRecebida",
     header: "Injeção (kWh)",
     cell: ({ row }) => fmtKwh(row.original.injecaoRecebida),
+  },
+  // --- Valores (R$) ---
+  {
+    accessorKey: "valor",
+    header: "Valor",
+    cell: ({ row }) => fmtBRL(row.original.valor),
+  },
+  {
+    accessorKey: "valor1",
+    header: "Valor 1",
+    cell: ({ row }) => fmtBRL(row.original.valor1),
+  },
+  {
+    accessorKey: "valor2",
+    header: "Valor 2",
+    cell: ({ row }) => fmtBRL(row.original.valor2),
+  },
+  {
+    accessorKey: "valor3",
+    header: "Valor 3",
+    cell: ({ row }) => fmtBRL(row.original.valor3),
   },
   {
     accessorKey: "valorTotalFatura",
@@ -119,10 +151,27 @@ const columns: ColumnDef<ConsumoRow, unknown>[] = [
       <span className="font-medium">{fmtBRL(row.original.valorTotalFatura)}</span>
     ),
   },
+  // --- Multas ---
+  {
+    accessorKey: "multasJurosAtraso",
+    header: "Multas / juros",
+    cell: ({ row }) => fmtBRL(row.original.multasJurosAtraso),
+  },
+  {
+    accessorKey: "outrasMultas",
+    header: "Outras multas",
+    cell: ({ row }) => fmtBRL(row.original.outrasMultas),
+  },
+  // --- Outros ---
   {
     accessorKey: "municipio",
     header: "Município",
     cell: ({ row }) => row.original.municipio ?? "—",
+  },
+  {
+    accessorKey: "statusAnexo",
+    header: "Status anexo",
+    cell: ({ row }) => row.original.statusAnexo ?? "—",
   },
   {
     id: "anexo",
@@ -131,6 +180,21 @@ const columns: ColumnDef<ConsumoRow, unknown>[] = [
     cell: ({ row }) => <FileLink url={row.original.arquivoFatura} />,
   },
 ];
+
+// Colunas escondidas por padrão — usuário pode liberar via dropdown "Colunas".
+// Visíveis no boot: filial, ano, mes, uc, consumoTotal, injecaoRecebida,
+// valorTotalFatura, municipio, anexo.
+const HIDDEN_BY_DEFAULT = {
+  consumoKwhP: false,
+  consumoKwhFp: false,
+  valor: false,
+  valor1: false,
+  valor2: false,
+  valor3: false,
+  multasJurosAtraso: false,
+  outrasMultas: false,
+  statusAnexo: false,
+};
 
 function renderDetails(c: ConsumoRow) {
   return (
@@ -211,6 +275,7 @@ export function ConsumoTable({ rows, filialOptions }: Props) {
       fields={fields}
       rows={rows}
       columns={columns}
+      initialColumnVisibility={HIDDEN_BY_DEFAULT}
       actions={actions}
       details={renderDetails}
     />

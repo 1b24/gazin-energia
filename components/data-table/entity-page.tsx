@@ -16,7 +16,10 @@
  *
  * As páginas de entidade (Tarefa 4) instanciam isso com ~30-50 linhas cada.
  */
-import { type ColumnDef } from "@tanstack/react-table";
+import {
+  type ColumnDef,
+  type VisibilityState,
+} from "@tanstack/react-table";
 import { Pencil, Plus, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useMemo, useState, useTransition, type ReactNode } from "react";
 import type { z } from "zod";
@@ -77,6 +80,8 @@ export interface EntityPageProps<
   actions?: EntityPageActions;
   details?: (entity: T) => ReactNode;
   relations?: EntityRelation<T>[];
+  /** Visibilidade inicial por coluna; usuário pode toggleá-las em "Colunas". */
+  initialColumnVisibility?: VisibilityState;
 }
 
 export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
@@ -93,6 +98,7 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
     actions,
     details,
     relations,
+    initialColumnVisibility,
   } = props;
 
   if (isStub(prismaModel)) {
@@ -114,6 +120,7 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
       actions={actions}
       details={details}
       relations={relations}
+      initialColumnVisibility={initialColumnVisibility}
     />
   );
 }
@@ -129,6 +136,7 @@ interface ActiveProps<T extends { id: string }, S extends z.ZodObject> {
   actions?: EntityPageActions;
   details?: (entity: T) => ReactNode;
   relations?: EntityRelation<T>[];
+  initialColumnVisibility?: VisibilityState;
 }
 
 function ActiveEntityPage<
@@ -143,6 +151,7 @@ function ActiveEntityPage<
   actions,
   details,
   relations,
+  initialColumnVisibility,
 }: ActiveProps<T, S>) {
   const [showArchived, setShowArchived] = useState(false);
   const [drawerEntity, setDrawerEntity] = useState<T | null>(null);
@@ -233,6 +242,7 @@ function ActiveEntityPage<
       <DataTable
         data={visibleRows}
         columns={augmentedColumns}
+        initialColumnVisibility={initialColumnVisibility}
         searchPlaceholder={`Buscar em ${title.toLowerCase()}...`}
         onRowClick={(row) => {
           setDrawerEntity(row);
