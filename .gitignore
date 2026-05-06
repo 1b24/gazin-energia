@@ -51,3 +51,6 @@ next-env.d.ts
 
 # graphify (índice de navegação local — regenerado via `graphify update .`)
 /graphify-out/
+
+# uploads locais (dev). Em produção, R2 — vide .env.example.
+/public/uploads/

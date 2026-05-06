@@ -8,7 +8,8 @@
  * `@hookform/resolvers/zod`. Suporta `create` e `edit` via prop `defaultValues`.
  */
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useTransition } from "react";
+import { Paperclip, Upload, X } from "lucide-react";
+import { useState, useTransition } from "react";
 import {
   Controller,
   useForm,
@@ -17,6 +18,7 @@ import {
 } from "react-hook-form";
 import type { z } from "zod";
 
+import { uploadFile } from "@/lib/actions/upload";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -40,7 +42,8 @@ export type FormFieldType =
   | "date"
   | "boolean"
   | "select"
-  | "cnpj";
+  | "cnpj"
+  | "file";
 
 export interface FormFieldConfig {
   name: string;
@@ -52,6 +55,10 @@ export interface FormFieldConfig {
   options?: { value: string; label: string }[]; // para `select`
   /** colspan: 1 = metade, 2 = inteira (grid de 2 colunas no desktop) */
   span?: 1 | 2;
+  /** Para `file`: subpasta dentro de `public/uploads/`. Default = "default". */
+  bucket?: string;
+  /** Para `file`: tipos aceitos (atributo `accept` do input). */
+  accept?: string;
 }
 
 export interface EntityFormProps<S extends z.ZodObject> {
@@ -274,5 +281,107 @@ function renderField(
           )}
         />
       );
+
+    case "file":
+      return (
+        <Controller
+          control={control}
+          name={f.name}
+          render={({ field }) => (
+            <FileField
+              id={f.name}
+              value={field.value as string | null | undefined}
+              onChange={field.onChange}
+              bucket={f.bucket ?? "default"}
+              accept={f.accept}
+            />
+          )}
+        />
+      );
   }
+}
+
+// ----------------------------------------------------------------------------
+// FileField — input de arquivo que sobe via server action e guarda só a URL.
+// ----------------------------------------------------------------------------
+
+function FileField({
+  id,
+  value,
+  onChange,
+  bucket,
+  accept,
+}: {
+  id: string;
+  value: string | null | undefined;
+  onChange: (v: string | null) => void;
+  bucket: string;
+  accept?: string;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const handleFile = (file: File | null) => {
+    if (!file) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("bucket", bucket);
+        const url = await uploadFile(fd);
+        onChange(url);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Falha no upload");
+      }
+    });
+  };
+
+  const filename = value ? value.split("/").pop() : null;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {value ? (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5">
+          <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <a
+            href={value}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 truncate text-sm hover:underline"
+            title={value}
+          >
+            {filename}
+          </a>
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Remover arquivo"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
+        <label
+          htmlFor={id}
+          className={cn(
+            "flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground transition-colors hover:bg-muted/40",
+            pending && "pointer-events-none opacity-50",
+          )}
+        >
+          <Upload className="h-4 w-4" />
+          {pending ? "Enviando..." : "Clique para anexar arquivo"}
+        </label>
+      )}
+      <input
+        id={id}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
 }

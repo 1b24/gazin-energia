@@ -3,6 +3,8 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Usina, VendaKwh } from "@prisma/client";
 
+import { Paperclip } from "lucide-react";
+
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
@@ -90,16 +92,35 @@ const columns: ColumnDef<VendaKwhRow, unknown>[] = [
   {
     accessorKey: "notaFiscalUrl",
     header: "NF",
-    cell: ({ row }) =>
-      row.original.notaFiscalUrl ? (
-        <span className="text-xs text-muted-foreground" title={row.original.notaFiscalUrl}>
-          {row.original.notaFiscalUrl.length > 32
-            ? `${row.original.notaFiscalUrl.slice(0, 30)}…`
-            : row.original.notaFiscalUrl}
+    enableSorting: false,
+    cell: ({ row }) => {
+      const url = row.original.notaFiscalUrl;
+      if (!url) return "—";
+      const isUploaded = url.startsWith("/uploads/");
+      const filename = url.split("/").pop() ?? url;
+      const display =
+        filename.length > 28 ? `${filename.slice(0, 26)}…` : filename;
+      if (isUploaded) {
+        return (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            title={filename}
+          >
+            <Paperclip className="h-3 w-3" />
+            {display}
+          </a>
+        );
+      }
+      return (
+        <span className="text-xs text-muted-foreground" title={url}>
+          {display}
         </span>
-      ) : (
-        "—"
-      ),
+      );
+    },
   },
 ];
 
@@ -125,7 +146,26 @@ function renderDetails(v: VendaKwhRow) {
         label="Preço médio (R$/kWh)"
         value={precoMedio != null ? fmtBRL(precoMedio) : null}
       />
-      <DetailField label="Nota fiscal" value={v.notaFiscalUrl} />
+      <DetailField
+        label="Nota fiscal"
+        value={
+          v.notaFiscalUrl ? (
+            v.notaFiscalUrl.startsWith("/uploads/") ? (
+              <a
+                href={v.notaFiscalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-primary hover:underline"
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+                {v.notaFiscalUrl.split("/").pop()}
+              </a>
+            ) : (
+              v.notaFiscalUrl
+            )
+          ) : null
+        }
+      />
     </dl>
   );
 }

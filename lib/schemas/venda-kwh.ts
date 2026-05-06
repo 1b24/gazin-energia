@@ -119,10 +119,12 @@ export function buildVendaKwhFormFields(
     },
     {
       name: "notaFiscalUrl",
-      label: "Nota fiscal (URL/arquivo)",
-      type: "textarea",
+      label: "Nota fiscal",
+      type: "file",
       span: 2,
-      helpText: "Cole o link/nome do arquivo da NF.",
+      bucket: "venda-kwh",
+      accept: ".pdf,image/*",
+      helpText: "Anexe o PDF ou imagem da NF (até 25 MB).",
     },
   ];
 }
