@@ -50,7 +50,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -197,9 +196,18 @@ export function DataTable<T extends { id?: string }>({
         <ColumnsMenu table={table} />
       </div>
 
-      {/* Tabela */}
+      {/* Tabela. <table-layout: fixed> + width explícita por coluna fazem o
+          column-resize do TanStack funcionar; usar o wrapper <Table> do shadcn
+          impõe `w-full` no <table> e quebra o resize. */}
       <div className="overflow-x-auto rounded-md border">
-        <Table style={{ width: table.getTotalSize() }}>
+        <table
+          className="caption-bottom text-sm"
+          style={{
+            tableLayout: "fixed",
+            width: table.getTotalSize(),
+            minWidth: "100%",
+          }}
+        >
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
@@ -240,12 +248,15 @@ export function DataTable<T extends { id?: string }>({
                           }}
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
-                            "absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none",
-                            "bg-transparent transition-colors",
-                            "hover:bg-primary/40",
-                            isResizing && "bg-primary",
+                            // Área de grab mais larga (4px) pra facilitar o
+                            // mouse pegar; visualmente uma linha sutil de 1px.
+                            "group/resize absolute top-0 right-0 z-10 flex h-full w-1 cursor-col-resize touch-none items-stretch justify-center select-none",
+                            "before:block before:w-px before:bg-border/60 before:transition-colors",
+                            "hover:before:w-0.5 hover:before:bg-primary",
+                            isResizing && "before:w-0.5 before:bg-primary",
                           )}
                           aria-hidden
+                          title="Arrastar para redimensionar"
                         />
                       )}
                     </TableHead>
@@ -300,7 +311,7 @@ export function DataTable<T extends { id?: string }>({
               </TableRow>
             )}
           </TableBody>
-        </Table>
+        </table>
       </div>
 
       {/* Pagination */}
