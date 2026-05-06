@@ -9,7 +9,7 @@
  */
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Paperclip, Upload, X } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
   Controller,
   useForm,
@@ -320,6 +320,7 @@ function FileField({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (file: File | null) => {
     if (!file) return;
@@ -337,49 +338,87 @@ function FileField({
     });
   };
 
+  const trigger = () => inputRef.current?.click();
+
+  const hasValue = !!value && value.trim().length > 0;
+  // URL real (servida pelo Next ou externa) vs texto legado (ex: ID do Zoho).
+  const isLink =
+    !!value && (value.startsWith("/") || /^https?:\/\//.test(value));
   const filename = value ? value.split("/").pop() : null;
 
   return (
     <div className="flex flex-col gap-1.5">
-      {value ? (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5">
-          <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <a
-            href={value}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 truncate text-sm hover:underline"
-            title={value}
-          >
-            {filename}
-          </a>
-          <button
-            type="button"
-            onClick={() => onChange(null)}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Remover arquivo"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+      {hasValue ? (
+        <div className="flex flex-col gap-2 rounded-md border bg-muted/30 px-2.5 py-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {isLink ? (
+              <a
+                href={value!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 truncate hover:underline"
+                title={value!}
+              >
+                {filename}
+              </a>
+            ) : (
+              <span
+                className="flex-1 truncate text-xs italic text-muted-foreground"
+                title={value!}
+              >
+                {value} (legado — substitua para anexar arquivo)
+              </span>
+            )}
+          </div>
+          <div className="flex gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={trigger}
+              disabled={pending}
+            >
+              <Upload className="mr-1 h-3.5 w-3.5" />
+              {pending ? "Enviando..." : "Substituir"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onChange(null)}
+              disabled={pending}
+            >
+              <X className="mr-1 h-3.5 w-3.5" />
+              Remover
+            </Button>
+          </div>
         </div>
       ) : (
-        <label
-          htmlFor={id}
+        <button
+          type="button"
+          onClick={trigger}
+          disabled={pending}
           className={cn(
             "flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground transition-colors hover:bg-muted/40",
-            pending && "pointer-events-none opacity-50",
+            pending && "cursor-not-allowed opacity-50",
           )}
         >
           <Upload className="h-4 w-4" />
           {pending ? "Enviando..." : "Clique para anexar arquivo"}
-        </label>
+        </button>
       )}
       <input
+        ref={inputRef}
         id={id}
         type="file"
         accept={accept}
         className="hidden"
-        onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+        onChange={(e) => {
+          handleFile(e.target.files?.[0] ?? null);
+          // Reset pra permitir re-upload do mesmo arquivo.
+          e.target.value = "";
+        }}
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
