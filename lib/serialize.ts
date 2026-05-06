@@ -24,13 +24,23 @@ export type Serialized<T> = T extends Decimal
 
 function isDecimalLike(v: unknown): v is { toNumber(): number } {
   if (v == null || typeof v !== "object") return false;
-  // @prisma/client devolve uma instância de Prisma.Decimal cujo construtor é
-  // `Decimal` (do decimal.js) e tem `toNumber`. Cobrir ambos com duck-typing.
+  // Path #1: instância da nossa cópia do decimal.js (lib root).
   if (v instanceof Decimal) return true;
-  return (
-    typeof (v as { toNumber?: unknown }).toNumber === "function" &&
-    typeof (v as { toFixed?: unknown }).toFixed === "function"
-  );
+  // Path #2: instância de OUTRA cópia (Prisma 7 traz a sua própria — o
+  // `instanceof` falha entre cópias). Duck-type por `toNumber` é suficiente:
+  // Date, Buffer, etc. não têm. Importante: NÃO exigimos `toFixed`, porque
+  // versões internas do Prisma podem omitir.
+  if (typeof (v as { toNumber?: unknown }).toNumber === "function") {
+    // Sanity adicional: descarta objects que tem toNumber mas não são
+    // decimais — precisa também produzir number ao chamar.
+    try {
+      const n = (v as { toNumber(): unknown }).toNumber();
+      return typeof n === "number";
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 export function serializePrisma<T>(input: T): Serialized<T> {
