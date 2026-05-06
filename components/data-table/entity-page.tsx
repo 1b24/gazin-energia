@@ -175,6 +175,10 @@ function ActiveEntityPage<
       header: "",
       enableSorting: false,
       enableHiding: false,
+      enableResizing: false,
+      size: 44,
+      minSize: 44,
+      maxSize: 44,
       cell: ({ row }) => (
         <button
           type="button"

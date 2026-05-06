@@ -112,7 +112,10 @@ export function DataTable<T extends { id?: string }>({
           id: "_select",
           enableSorting: false,
           enableHiding: false,
-          size: 32,
+          enableResizing: false,
+          size: 36,
+          minSize: 36,
+          maxSize: 36,
           header: ({ table }) => (
             <div onClick={(e) => e.stopPropagation()} className="flex">
               <Checkbox
@@ -171,6 +174,9 @@ export function DataTable<T extends { id?: string }>({
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     enableMultiSort: true,
+    enableColumnResizing: true,
+    columnResizeMode: "onChange",
+    defaultColumn: { size: 180, minSize: 60, maxSize: 800 },
     initialState: { pagination: { pageSize } },
   });
 
@@ -192,24 +198,27 @@ export function DataTable<T extends { id?: string }>({
       </div>
 
       {/* Tabela */}
-      <div className="rounded-md border">
-        <Table>
+      <div className="overflow-x-auto rounded-md border">
+        <Table style={{ width: table.getTotalSize() }}>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id}>
                 {hg.headers.map((h) => {
                   const sort = h.column.getIsSorted();
                   const canSort = h.column.getCanSort();
+                  const canResize = h.column.getCanResize();
+                  const isResizing = h.column.getIsResizing();
                   return (
                     <TableHead
                       key={h.id}
                       onClick={canSort ? h.column.getToggleSortingHandler() : undefined}
+                      style={{ width: h.getSize() }}
                       className={cn(
+                        "relative whitespace-nowrap",
                         canSort && "cursor-pointer select-none",
-                        "whitespace-nowrap",
                       )}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 pr-3">
                         {h.isPlaceholder
                           ? null
                           : flexRender(h.column.columnDef.header, h.getContext())}
@@ -219,6 +228,26 @@ export function DataTable<T extends { id?: string }>({
                           />
                         )}
                       </div>
+                      {canResize && (
+                        <div
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            h.getResizeHandler()(e);
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            h.getResizeHandler()(e);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize touch-none select-none",
+                            "bg-transparent transition-colors",
+                            "hover:bg-primary/40",
+                            isResizing && "bg-primary",
+                          )}
+                          aria-hidden
+                        />
+                      )}
                     </TableHead>
                   );
                 })}
@@ -248,7 +277,8 @@ export function DataTable<T extends { id?: string }>({
                     return (
                       <TableCell
                         key={cell.id}
-                        className="whitespace-nowrap"
+                        style={{ width: cell.column.getSize() }}
+                        className="overflow-hidden truncate whitespace-nowrap"
                         onClick={
                           isSelectCell ? (e) => e.stopPropagation() : undefined
                         }
