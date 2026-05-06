@@ -101,7 +101,10 @@ export function EntityDrawer<T extends { id: string }, S extends z.ZodObject>({
         </SheetHeader>
 
         {entity ? (
-          <Tabs defaultValue="detalhes" className="flex flex-1 flex-col">
+          <Tabs
+            defaultValue="detalhes"
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
             <TabsList className="mx-6 mt-3 h-9 self-start">
               <TabsTrigger value="detalhes">
                 {editing ? "Editar" : "Detalhes"}
@@ -117,7 +120,7 @@ export function EntityDrawer<T extends { id: string }, S extends z.ZodObject>({
               )}
             </TabsList>
 
-            <ScrollArea className="flex-1">
+            <ScrollArea className="min-h-0 flex-1">
               <TabsContent value="detalhes" className="px-6 py-4">
                 {editing && schema && fields && onSave ? (
                   <EntityForm<S>

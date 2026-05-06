@@ -5,10 +5,12 @@
  *
  * Geração é a primeira entidade com tabela-filha (`GeracaoDia`). Mostra:
  *  - na coluna "Total kWh", soma de todos os dias da geração;
- *  - aba "Dias" no drawer com grade 1..31 + total + média.
+ *  - aba "Dias" no drawer com grade 1..31 editável (Pencil → input).
  */
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Geracao, GeracaoDia, Usina } from "@prisma/client";
+import { Pencil, Save, X } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
 
 import {
   DetailField,
@@ -16,6 +18,8 @@ import {
 } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   buildGeracaoFormFields,
   geracaoSchema,
@@ -131,76 +135,195 @@ function renderDetails(g: GeracaoRow) {
   );
 }
 
-/** Aba "Dias" do drawer — grade compacta com os 31 valores diários. */
-const diasRelation: EntityRelation<GeracaoRow> = {
-  label: "Dias",
-  render: (g) => {
-    const total = totalKwh(g.dias);
-    const ativos = diasComDado(g.dias);
-    const media = ativos > 0 ? total / ativos : 0;
-    const max = g.dias.reduce((m, d) => Math.max(m, d.kwh ?? 0), 0);
-    const min = g.dias.reduce(
-      (m, d) => (d.kwh != null && d.kwh > 0 ? Math.min(m, d.kwh) : m),
-      max || Infinity,
-    );
+/** Aba "Dias" — read-only por padrão, edição inline via toggle. */
+function DiasPanel({ geracao }: { geracao: GeracaoRow }) {
+  const [editing, setEditing] = useState(false);
+  const [pending, startTransition] = useTransition();
 
-    const byDia = new Map<number, number | null>();
-    for (const d of g.dias) byDia.set(d.dia, d.kwh ?? null);
+  // String que aparece no <input> (formato BR). null = sem valor.
+  const initialValues = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const d of geracao.dias) {
+      m.set(
+        d.dia,
+        d.kwh != null
+          ? d.kwh.toLocaleString("pt-BR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })
+          : "",
+      );
+    }
+    return m;
+  }, [geracao.dias]);
 
-    return (
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+  // Reset entre entidades é via `key={g.id}` na relation — DiasPanel
+  // remonta e a state é re-inicializada do zero.
+  const [values, setValues] = useState<Map<number, string>>(initialValues);
+
+  const dirtyDias = useMemo(() => {
+    const out: { dia: number; kwh: string }[] = [];
+    for (let dia = 1; dia <= 31; dia++) {
+      const original = initialValues.get(dia) ?? "";
+      const current = values.get(dia) ?? "";
+      if (original.trim() !== current.trim()) {
+        out.push({ dia, kwh: current });
+      }
+    }
+    return out;
+  }, [values, initialValues]);
+
+  const cancelEdit = () => {
+    setValues(initialValues);
+    setEditing(false);
+  };
+
+  const saveEdit = () => {
+    if (dirtyDias.length === 0) {
+      setEditing(false);
+      return;
+    }
+    startTransition(async () => {
+      await actions.updateDias(geracao.id, dirtyDias);
+      setEditing(false);
+    });
+  };
+
+  // Stats — recomputados em tempo real durante a edição.
+  const numericValues = useMemo(() => {
+    const m = new Map<number, number | null>();
+    for (let dia = 1; dia <= 31; dia++) {
+      const raw = values.get(dia)?.trim() ?? "";
+      if (!raw) {
+        m.set(dia, null);
+      } else {
+        const n = Number(raw.replace(/\./g, "").replace(",", "."));
+        m.set(dia, Number.isFinite(n) ? n : null);
+      }
+    }
+    return m;
+  }, [values]);
+
+  const total = Array.from(numericValues.values()).reduce<number>(
+    (a, n) => a + (n ?? 0),
+    0,
+  );
+  const ativos = Array.from(numericValues.values()).filter(
+    (n) => n != null && n > 0,
+  ).length;
+  const media = ativos > 0 ? total / ativos : 0;
+  const positivos = Array.from(numericValues.values()).filter(
+    (n): n is number => n != null && n > 0,
+  );
+  const max = positivos.length ? Math.max(...positivos) : 0;
+  const min = positivos.length ? Math.min(...positivos) : 0;
+
+  const metaDiaria =
+    geracao.metaMensal != null ? geracao.metaMensal / 31 : null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="grid flex-1 grid-cols-2 gap-2 text-sm sm:grid-cols-4">
           <Stat label="Total" value={`${formatKwh(total)} kWh`} />
           <Stat label="Média" value={`${formatKwh(media)} kWh`} />
           <Stat label="Máx" value={`${formatKwh(max)} kWh`} />
-          <Stat
-            label="Mín"
-            value={
-              ativos > 0 ? `${formatKwh(Number.isFinite(min) ? min : 0)} kWh` : "—"
-            }
-          />
+          <Stat label="Mín" value={ativos > 0 ? `${formatKwh(min)} kWh` : "—"} />
         </div>
-
-        <div className="rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-3 py-1.5 text-left">Dia</th>
-                <th className="px-3 py-1.5 text-right">kWh</th>
-                <th className="px-3 py-1.5 text-right">% da meta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => {
-                const kwh = byDia.get(dia);
-                const metaDiaria =
-                  g.metaMensal != null ? g.metaMensal / 31 : null;
-                const pct =
-                  kwh != null && metaDiaria && metaDiaria > 0
-                    ? (kwh / metaDiaria) * 100
-                    : null;
-                return (
-                  <tr key={dia} className="border-t">
-                    <td className="px-3 py-1 font-mono text-xs">
-                      {String(dia).padStart(2, "0")}
-                    </td>
-                    <td className="px-3 py-1 text-right">
-                      {kwh != null ? formatKwh(kwh) : "—"}
-                    </td>
-                    <td className="px-3 py-1 text-right text-xs text-muted-foreground">
-                      {pct != null
-                        ? `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%`
-                        : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="ml-3 shrink-0">
+          {editing ? (
+            <div className="flex gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={cancelEdit}
+                disabled={pending}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                onClick={saveEdit}
+                disabled={pending || dirtyDias.length === 0}
+              >
+                <Save className="mr-1 h-3.5 w-3.5" />
+                {pending
+                  ? "Salvando..."
+                  : `Salvar${dirtyDias.length ? ` (${dirtyDias.length})` : ""}`}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              Editar dias
+            </Button>
+          )}
         </div>
       </div>
-    );
-  },
+
+      <div className="rounded-md border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="px-3 py-1.5 text-left">Dia</th>
+              <th className="px-3 py-1.5 text-right">kWh</th>
+              <th className="px-3 py-1.5 text-right">% da meta</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => {
+              const kwh = numericValues.get(dia);
+              const pct =
+                kwh != null && metaDiaria && metaDiaria > 0
+                  ? (kwh / metaDiaria) * 100
+                  : null;
+              return (
+                <tr key={dia} className="border-t">
+                  <td className="px-3 py-1 font-mono text-xs">
+                    {String(dia).padStart(2, "0")}
+                  </td>
+                  <td className="px-3 py-1 text-right">
+                    {editing ? (
+                      <Input
+                        value={values.get(dia) ?? ""}
+                        onChange={(e) => {
+                          const next = new Map(values);
+                          next.set(dia, e.target.value);
+                          setValues(next);
+                        }}
+                        placeholder="—"
+                        inputMode="decimal"
+                        className="ml-auto h-7 w-28 text-right text-sm"
+                      />
+                    ) : kwh != null ? (
+                      formatKwh(kwh)
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-1 text-right text-xs text-muted-foreground">
+                    {pct != null
+                      ? `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%`
+                      : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const diasRelation: EntityRelation<GeracaoRow> = {
+  label: "Dias",
+  render: (g) => <DiasPanel key={g.id} geracao={g} />,
 };
 
 function Stat({ label, value }: { label: string; value: string }) {
