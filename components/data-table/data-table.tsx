@@ -70,6 +70,8 @@ interface DataTableProps<T> {
   toolbarRight?: ReactNode;
   /** Click numa linha. Em geral usado pra abrir o drawer da entidade. */
   onRowClick?: (row: T) => void;
+  /** Double-click numa linha. Em geral usado pra abrir o drawer já em modo edit. */
+  onRowDoubleClick?: (row: T) => void;
   /** Inicial — quantas linhas por página (default 50). */
   initialPageSize?: number;
   /** Habilita coluna de checkbox de seleção (default `true`). */
@@ -85,6 +87,7 @@ export function DataTable<T extends { id?: string }>({
   searchPlaceholder = "Buscar...",
   toolbarRight,
   onRowClick,
+  onRowDoubleClick,
   initialPageSize = 50,
   selectable = true,
   onSelectionChange,
@@ -220,8 +223,17 @@ export function DataTable<T extends { id?: string }>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  className={cn(onRowClick && "cursor-pointer")}
-                  onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+                  className={cn(
+                    (onRowClick || onRowDoubleClick) && "cursor-pointer",
+                  )}
+                  onClick={
+                    onRowClick ? () => onRowClick(row.original) : undefined
+                  }
+                  onDoubleClick={
+                    onRowDoubleClick
+                      ? () => onRowDoubleClick(row.original)
+                      : undefined
+                  }
                 >
                   {row.getVisibleCells().map((cell) => {
                     const isSelectCell = cell.column.id === "_select";

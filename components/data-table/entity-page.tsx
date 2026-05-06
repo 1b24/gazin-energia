@@ -3,21 +3,32 @@
 /**
  * `<EntityPage />` — orquestrador de cada página de entidade.
  *
- * Recebe a entidade, dados pré-carregados (server component → client) e a
- * configuração de tabela/form/drawer. Decide se renderiza:
- *   1) o EmptyState (quando ENTITY_STATUS marca a entidade como "stub"); ou
- *   2) o toolbar + DataTable + drawer + dialog de criar/editar.
+ * Renderiza:
+ *   1) EmptyState quando ENTITY_STATUS marca a entidade como "stub"; OU
+ *   2) toolbar + DataTable + drawer + dialogs (criar e editar).
  *
- * As 11 entidades ATIVAS instanciam isso na Tarefa 4 com ~30-50 linhas cada.
+ * Três fluxos pra editar um registro existente (todos chegam ao mesmo
+ * `actions.update`):
+ *   A) Botão "Editar" no header do drawer — alterna a aba "Detalhes" entre
+ *      read-only e form.
+ *   B) Botão lápis na última coluna da tabela — abre dialog dedicado.
+ *   C) Double-click numa linha — abre drawer já em modo edit.
+ *
+ * As páginas de entidade (Tarefa 4) instanciam isso com ~30-50 linhas cada.
  */
 import { type ColumnDef } from "@tanstack/react-table";
-import { Plus, Trash2, Undo2 } from "lucide-react";
-import { useCallback, useState, useTransition, type ReactNode } from "react";
+import { Pencil, Plus, Trash2, Undo2 } from "lucide-react";
+import { useCallback, useMemo, useState, useTransition, type ReactNode } from "react";
 import type { z } from "zod";
 
+import { entityToFormDefaults } from "@/components/forms/defaults";
+import {
+  EntityForm,
+  type FormFieldConfig,
+} from "@/components/forms/entity-form";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,12 +42,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { isStub } from "@/lib/modules/status";
-import {
-  EntityForm,
-  type FormFieldConfig,
-} from "@/components/forms/entity-form";
+import { cn } from "@/lib/utils";
 
 import { DataTable } from "./data-table";
 import { EntityEmptyState } from "./empty-state";
@@ -49,27 +56,26 @@ export interface EntityPageActions {
   bulkExport?: (
     ids: string[] | "all",
     format: "xlsx" | "csv" | "json",
-  ) => Promise<{ buffer: ArrayBuffer | Uint8Array | string; filename: string; mimetype: string }>;
+  ) => Promise<{
+    buffer: ArrayBuffer | Uint8Array | string;
+    filename: string;
+    mimetype: string;
+  }>;
 }
 
-export interface EntityPageProps<T extends { id: string }, S extends z.ZodObject> {
-  /** Nome legível ("Usinas", "Filiais"). */
+export interface EntityPageProps<
+  T extends { id: string },
+  S extends z.ZodObject,
+> {
   title: string;
-  /** Nome do model Prisma — usado pra checar ENTITY_STATUS. */
   prismaModel: string;
-  /** Nome canônico do JSON em `data/raw/`. Usado no EmptyState. */
   rawFileName: string;
-  /** Schema Zod, alimenta o form de criar/editar. */
   schema?: S;
   fields?: FormFieldConfig[];
-  /** Linhas a renderizar (vêm do server component caller). */
   rows: T[];
   columns: ColumnDef<T, unknown>[];
-  /** Server actions geradas pelo `createCrudActions`. */
   actions?: EntityPageActions;
-  /** Render-prop pro Drawer "Detalhes". */
   details?: (entity: T) => ReactNode;
-  /** Aba "Relacionados" do Drawer. */
   relations?: EntityRelation<T>[];
 }
 
@@ -89,7 +95,6 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
     relations,
   } = props;
 
-  // ----- Stub gate -----
   if (isStub(prismaModel)) {
     return (
       <div className="flex flex-col gap-4">
@@ -114,8 +119,6 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
 }
 
 // ----------------------------------------------------------------------------
-// Cliente (com hooks) — separado pra simplificar o branch Stub do Active.
-// ----------------------------------------------------------------------------
 
 interface ActiveProps<T extends { id: string }, S extends z.ZodObject> {
   title: string;
@@ -128,7 +131,10 @@ interface ActiveProps<T extends { id: string }, S extends z.ZodObject> {
   relations?: EntityRelation<T>[];
 }
 
-function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S extends z.ZodObject>({
+function ActiveEntityPage<
+  T extends { id: string; deletedAt?: Date | null },
+  S extends z.ZodObject,
+>({
   title,
   rows,
   columns,
@@ -140,21 +146,51 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
 }: ActiveProps<T, S>) {
   const [showArchived, setShowArchived] = useState(false);
   const [drawerEntity, setDrawerEntity] = useState<T | null>(null);
+  const [drawerEditing, setDrawerEditing] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editDialogEntity, setEditDialogEntity] = useState<T | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
+
+  const canEdit = !!schema && !!fields && !!actions?.update;
 
   const visibleRows = rows.filter(
     (r) => showArchived || !(r as { deletedAt?: Date | null }).deletedAt,
   );
 
+  // (B) Coluna de lápis — anexada se houver capacidade de edição.
+  const augmentedColumns = useMemo<ColumnDef<T, unknown>[]>(() => {
+    if (!canEdit) return columns;
+    const editColumn: ColumnDef<T, unknown> = {
+      id: "_edit",
+      header: "",
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }) => (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setEditDialogEntity(row.original);
+          }}
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Editar"
+          title="Editar"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      ),
+    };
+    return [...columns, editColumn];
+  }, [columns, canEdit]);
+
+  // ---------- Bulk handlers ----------
   const onBulkDelete = useCallback(() => {
     if (!actions?.bulkDelete || selectedIds.length === 0) return;
     if (!confirm(`Arquivar ${selectedIds.length} registro(s)?`)) return;
     startTransition(async () => {
       await actions.bulkDelete!(selectedIds);
       setSelectedIds([]);
-      // Refresh do server component cabe ao caller via revalidatePath na action.
     });
   }, [actions, selectedIds]);
 
@@ -168,6 +204,15 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
       });
     },
     [actions, selectedIds],
+  );
+
+  // ---------- Update handler — usado por A, B, C ----------
+  const onUpdate = useCallback(
+    async (id: string, values: unknown) => {
+      if (!actions?.update) return;
+      await actions.update(id, values);
+    },
+    [actions],
   );
 
   return (
@@ -187,9 +232,21 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
 
       <DataTable
         data={visibleRows}
-        columns={columns}
+        columns={augmentedColumns}
         searchPlaceholder={`Buscar em ${title.toLowerCase()}...`}
-        onRowClick={(row) => setDrawerEntity(row)}
+        onRowClick={(row) => {
+          setDrawerEntity(row);
+          setDrawerEditing(false);
+        }}
+        // (C) Double-click → drawer em modo edit
+        onRowDoubleClick={
+          canEdit
+            ? (row) => {
+                setDrawerEntity(row);
+                setDrawerEditing(true);
+              }
+            : undefined
+        }
         onSelectionChange={setSelectedIds}
         toolbarRight={
           <div className="flex items-center gap-2">
@@ -197,7 +254,9 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
               <Checkbox
                 id="show-archived"
                 checked={showArchived}
-                onCheckedChange={(checked: boolean) => setShowArchived(checked)}
+                onCheckedChange={(checked: boolean) =>
+                  setShowArchived(checked)
+                }
               />
               <Label htmlFor="show-archived" className="cursor-pointer">
                 Mostrar arquivados
@@ -245,14 +304,31 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
         }
       />
 
-      {/* Drawer */}
-      <EntityDrawer
+      {/* (A) Drawer com toggle Edit no header */}
+      <EntityDrawer<T, S>
         open={!!drawerEntity}
-        onOpenChange={(open) => !open && setDrawerEntity(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDrawerEntity(null);
+            setDrawerEditing(false);
+          }
+        }}
         entity={drawerEntity}
         title={title.replace(/s$/, "")}
-        details={details ?? (() => <p className="text-sm text-muted-foreground">Sem renderer de detalhes configurado.</p>)}
+        details={
+          details ??
+          (() => (
+            <p className="text-sm text-muted-foreground">
+              Sem renderer de detalhes configurado.
+            </p>
+          ))
+        }
         relations={relations}
+        editing={drawerEditing}
+        onEditingChange={canEdit ? setDrawerEditing : undefined}
+        schema={canEdit ? schema : undefined}
+        fields={canEdit ? fields : undefined}
+        onSave={canEdit ? onUpdate : undefined}
       />
 
       {/* Create dialog */}
@@ -274,13 +350,42 @@ function ActiveEntityPage<T extends { id: string; deletedAt?: Date | null }, S e
           </DialogContent>
         </Dialog>
       )}
+
+      {/* (B) Edit dialog — disparado pelo lápis na coluna */}
+      {canEdit && (
+        <Dialog
+          open={!!editDialogEntity}
+          onOpenChange={(open) => !open && setEditDialogEntity(null)}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Editar {title.replace(/s$/, "")}</DialogTitle>
+            </DialogHeader>
+            {editDialogEntity && (
+              <EntityForm
+                schema={schema!}
+                fields={fields!}
+                defaultValues={
+                  entityToFormDefaults(
+                    editDialogEntity as unknown as Record<string, unknown>,
+                    fields!,
+                  ) as never
+                }
+                submitLabel="Salvar alterações"
+                cancelLabel="Cancelar"
+                onCancel={() => setEditDialogEntity(null)}
+                onSubmit={async (values) => {
+                  await onUpdate(editDialogEntity.id, values);
+                  setEditDialogEntity(null);
+                }}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
-
-// ----------------------------------------------------------------------------
-// Header
-// ----------------------------------------------------------------------------
 
 function Header({
   title,
@@ -299,17 +404,15 @@ function Header({
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {stub && <Badge variant="outline">stub</Badge>}
         {count != null && (
-          <Badge variant="secondary">{count} registro{count === 1 ? "" : "s"}</Badge>
+          <Badge variant="secondary">
+            {count} registro{count === 1 ? "" : "s"}
+          </Badge>
         )}
       </div>
       {rightSlot}
     </div>
   );
 }
-
-// ----------------------------------------------------------------------------
-// Download helper (client side blob trick).
-// ----------------------------------------------------------------------------
 
 function downloadBlob(payload: {
   buffer: ArrayBuffer | Uint8Array | string;
