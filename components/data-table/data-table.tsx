@@ -226,7 +226,7 @@ export function DataTable<T extends { id?: string }>({
                         canSort && "cursor-pointer select-none",
                       )}
                     >
-                      <div className="flex items-center gap-1 pr-3">
+                      <div className="flex items-center gap-1 pr-5">
                         {h.isPlaceholder
                           ? null
                           : flexRender(h.column.columnDef.header, h.getContext())}
@@ -248,9 +248,10 @@ export function DataTable<T extends { id?: string }>({
                           }}
                           onClick={(e) => e.stopPropagation()}
                           className={cn(
-                            // Área de grab mais larga (4px) pra facilitar o
-                            // mouse pegar; visualmente uma linha sutil de 1px.
-                            "group/resize absolute top-0 right-0 z-10 flex h-full w-1 cursor-col-resize touch-none items-stretch justify-center select-none",
+                            // Área de grab de 10px (afastada do conteúdo do
+                            // header pra não conflitar com sort chevron);
+                            // visualmente uma linha sutil de 1px no centro.
+                            "group/resize absolute top-0 right-0 z-10 flex h-full w-2.5 cursor-col-resize touch-none items-stretch justify-center select-none",
                             "before:block before:w-px before:bg-border/60 before:transition-colors",
                             "hover:before:w-0.5 hover:before:bg-primary",
                             isResizing && "before:w-0.5 before:bg-primary",
