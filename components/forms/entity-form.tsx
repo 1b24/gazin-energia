@@ -213,6 +213,9 @@ function renderField(
           name={f.name}
           render={({ field }) => (
             <Select
+              // base-ui: passa `items` pra que <SelectValue> mostre o label
+              // do item selecionado em vez do raw value (ex: cuid de Filial).
+              items={f.options ?? []}
               value={field.value ?? ""}
               onValueChange={(v) => field.onChange(v || null)}
             >
