@@ -13,7 +13,8 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "db:validate": "tsx scripts/validate-migration.ts"
+    "db:validate": "tsx scripts/validate-migration.ts",
+    "check:rbac": "tsx scripts/check-rbac.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

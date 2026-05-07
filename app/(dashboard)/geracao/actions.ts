@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { auth } from "@/lib/auth";
 import { createCrudActions } from "@/lib/actions/crud";
-import { prisma } from "@/lib/db";
+import { prisma, userCanAccessId } from "@/lib/db";
 import { geracaoSchema } from "@/lib/schemas/geracao";
 
 const actions = createCrudActions("Geracao", geracaoSchema, {
@@ -46,6 +47,14 @@ export async function updateDias(
   geracaoId: string,
   dias: { dia: number; kwh: unknown }[],
 ): Promise<{ count: number }> {
+  // RBAC: exige session + autoriza via scopedPrisma.
+  const session = await auth();
+  if (!session?.user) throw new Error("Não autenticado.");
+  const ok = await userCanAccessId(session.user, "geracao", geracaoId);
+  if (!ok) {
+    throw new Error("Não autorizado: geração fora do escopo do usuário.");
+  }
+
   const parsed = diaInputSchema.parse(dias);
 
   // Garante que a Geracao existe (e que ainda não está soft-deleted).

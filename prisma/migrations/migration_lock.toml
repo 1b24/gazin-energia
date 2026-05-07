@@ -1,0 +1,4 @@
+# Prisma — provider lock pra migrations.
+# Gerado manualmente porque o migrate engine teve problema com o driver
+# adapter atual. Conteúdo idêntico ao que `prisma migrate dev` geraria.
+provider = "postgresql"

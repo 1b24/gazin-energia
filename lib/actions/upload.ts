@@ -12,6 +12,20 @@ import { saveFile } from "@/lib/storage";
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB — suficiente pra PDFs/JPGs de NF.
 
+/**
+ * Buckets aceitos. Cada entidade que usa `type: "file"` no FormFieldConfig
+ * registra seu nome aqui. Tentativas com bucket fora dessa lista são rejeitadas
+ * — impede gestor_filial subir arquivo num bucket arbitrário.
+ */
+const ALLOWED_BUCKETS = new Set([
+  "default",
+  "venda-kwh",
+  "consumo",
+  "injecao",
+  "orcamento",
+  "manutencao-preventiva",
+]);
+
 export async function uploadFile(formData: FormData): Promise<string> {
   const session = await auth();
   if (!session?.user) {
@@ -21,6 +35,9 @@ export async function uploadFile(formData: FormData): Promise<string> {
   const file = formData.get("file");
   const bucket = String(formData.get("bucket") ?? "default");
 
+  if (!ALLOWED_BUCKETS.has(bucket)) {
+    throw new Error(`Bucket inválido: "${bucket}".`);
+  }
   if (!(file instanceof File)) {
     throw new Error("Arquivo não fornecido.");
   }

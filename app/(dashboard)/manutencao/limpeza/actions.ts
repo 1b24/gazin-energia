@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { StatusManutencao } from "@prisma/client";
 
+import { auth } from "@/lib/auth";
 import { createCrudActions } from "@/lib/actions/crud";
-import { prisma } from "@/lib/db";
+import { prisma, userCanAccessId } from "@/lib/db";
 import { cronogramaLimpezaSchema } from "@/lib/schemas/cronograma-limpeza";
 
 const actions = createCrudActions(
@@ -67,6 +68,18 @@ export async function updateItens(
     fotoUrl: unknown;
   }[],
 ): Promise<{ count: number }> {
+  // RBAC: exige session + autoriza via scopedPrisma.
+  const session = await auth();
+  if (!session?.user) throw new Error("Não autenticado.");
+  const ok = await userCanAccessId(
+    session.user,
+    "cronogramaLimpeza",
+    cronogramaId,
+  );
+  if (!ok) {
+    throw new Error("Não autorizado: cronograma fora do escopo do usuário.");
+  }
+
   const parsed = itemInputSchema.parse(itens);
 
   const cron = await prisma.cronogramaLimpeza.findUnique({

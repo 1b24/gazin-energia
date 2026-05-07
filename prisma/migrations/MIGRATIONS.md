@@ -24,6 +24,19 @@ npx prisma migrate diff \
 Em um banco vazio, `db:migrate:deploy` aplica a baseline + cria todas as
 tabelas, enums e índices em uma transação.
 
+## Validação (rodada): baseline funciona em DB limpo
+
+Testado em `prisma/migrations/0001_baseline/migration.sql` (661 linhas) num
+sandbox do `prisma dev`:
+
+```
+Applying migration `0001_baseline`
+All migrations have been successfully applied.
+```
+
+→ Banco vazio + `npm run db:migrate:deploy` cria todo o schema corretamente.
+→ Em seguida, `npm run db:seed` popula filiais/usinas/etc + cria admin.
+
 ## Banco de dev existente (estado atual)
 
 O DB local foi populado via `db push` antes do baseline existir. Como o
