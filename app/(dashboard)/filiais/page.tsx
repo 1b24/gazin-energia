@@ -1,10 +1,14 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { FiliaisTable, type FilialRow } from "./filiais-table";
 
 export default async function FiliaisPage() {
-  const rows = await prisma.filial.findMany({
+  const session = await auth();
+  const db = scopedPrisma(session?.user);
+
+  const rows = await db.filial.findMany({
     include: {
       _count: {
         select: {

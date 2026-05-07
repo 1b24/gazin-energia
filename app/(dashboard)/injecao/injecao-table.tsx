@@ -40,7 +40,7 @@ const fmtBRL = (n: number | null | undefined) =>
 
 function FileLink({ url }: { url: string | null | undefined }) {
   if (!url) return <span className="text-muted-foreground">—</span>;
-  if (url.startsWith("/uploads/") || /^https?:\/\//.test(url)) {
+  if ((url.startsWith("/api/files/") || url.startsWith("/uploads/")) || /^https?:\/\//.test(url)) {
     const filename = url.split("/").pop() ?? url;
     return (
       <a

@@ -1,18 +1,22 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { LimpezaTable, type LimpezaRow } from "./limpeza-table";
 
 export default async function LimpezaPage() {
+  const session = await auth();
+  const db = scopedPrisma(session?.user);
+
   const [rows, usinaOptions] = await Promise.all([
-    prisma.cronogramaLimpeza.findMany({
+    db.cronogramaLimpeza.findMany({
       include: {
         usina: { select: { id: true, nome: true } },
         itens: { orderBy: { ordem: "asc" } },
       },
       orderBy: { usinaId: "asc" },
     }),
-    prisma.usina.findMany({
+    db.usina.findMany({
       where: { deletedAt: null },
       select: { id: true, nome: true },
       orderBy: { nome: "asc" },

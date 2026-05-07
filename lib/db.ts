@@ -28,39 +28,44 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 // ----------------------------------------------------------------------------
 
 /**
- * Models cuja query precisa ser filtrada por `filialId` quando o usuário é
- * gestor_filial / operacional. Models sem coluna filialId (ex: Geracao,
- * VendaKwh, Orcamento) cascateiam via Usina — não são filtrados aqui;
- * filtre via `usina: { filialId }` na chamada quando necessário.
+ * Tipos de scoping por model:
+ *   - "id":         model é a Filial em si — filtra por `id = user.filialId`.
+ *   - "filialId":   model tem coluna `filialId` direta.
+ *   - "usina":      model linka pra Usina — filtra via `usina.filialId`.
+ *   - omitido:      não escopado (ex: Fornecedor, Documento, ProcessoJuridico).
  */
-const FILIAL_SCOPED_MODELS = new Set([
-  "filial",
-  "usina",
-  "consumo",
-  "injecao",
-  "fornecedor",
-  "user",
-]);
+const MODEL_SCOPE: Record<string, "id" | "filialId" | "usina"> = {
+  filial: "id",
+  usina: "filialId",
+  consumo: "filialId",
+  injecao: "filialId",
+  user: "filialId",
+  // Via Usina (models sem coluna filialId direta):
+  geracao: "usina",
+  vendaKwh: "usina",
+  orcamento: "usina",
+  cronogramaLimpeza: "usina",
+  manutencaoPreventiva: "usina",
+  consertoEquipamento: "usina",
+  manutencaoCorretiva: "usina",
+  licenca: "usina",
+};
 
-/**
- * Devolve um cliente Prisma escopado para a filial do usuário atual. Admins
- * recebem o cliente normal; gestor_filial/operacional recebem um cliente
- * que injeta `filialId = <user.filialId>` em todo `findMany`/`findFirst`/
- * `count`/`update`/`delete` dos models acima.
- *
- * Para uso em server components / server actions:
- *
- *   ```ts
- *   const session = await auth();
- *   const db = scopedPrisma(session?.user);
- *   const usinas = await db.usina.findMany({ ... });
- *   ```
- */
 type ScopedUser = { role?: string; filialId?: string | null } | null | undefined;
 
+/**
+ * Devolve um cliente Prisma escopado para a filial do usuário. Admins recebem
+ * o cliente normal. Gestor_filial / operacional recebem cliente extended que
+ * injeta filtro de filial em **leituras** (findMany/findFirst/count/aggregate/
+ * groupBy/updateMany/deleteMany).
+ *
+ * `findUnique`/`update`/`delete` por id NÃO são escopados pelo extension
+ * (Prisma exige unique key, não aceita AND no where). A proteção pra mutações
+ * por id vive no factory `createCrudActions` (lib/actions/crud.ts), que faz
+ * pre-check via `findFirst` escopado antes de qualquer write.
+ */
 export function scopedPrisma(user: ScopedUser): PrismaClient {
   if (!user || user.role === "admin" || !user.filialId) {
-    // Admin e usuários sem filial veem tudo.
     return prisma;
   }
   const filialId = user.filialId;
@@ -71,31 +76,72 @@ export function scopedPrisma(user: ScopedUser): PrismaClient {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
           const m = model.charAt(0).toLowerCase() + model.slice(1);
-          if (!FILIAL_SCOPED_MODELS.has(m)) return query(args);
-          // Lemos/contamos/escrevemos só onde filialId === user.filialId.
-          // Em inserts (`create`), o caller decide o filialId.
+          const scope = MODEL_SCOPE[m];
+          if (!scope) return query(args);
+
+          // Operações que aceitam `where` arbitrário:
           if (
-            operation === "findMany" ||
-            operation === "findFirst" ||
-            operation === "findUnique" ||
-            operation === "count" ||
-            operation === "aggregate" ||
-            operation === "groupBy" ||
-            operation === "updateMany" ||
-            operation === "deleteMany"
+            operation !== "findMany" &&
+            operation !== "findFirst" &&
+            operation !== "count" &&
+            operation !== "aggregate" &&
+            operation !== "groupBy" &&
+            operation !== "updateMany" &&
+            operation !== "deleteMany"
           ) {
-            const a = (args ?? {}) as { where?: Record<string, unknown> };
-            // Filial em si filtra por id; demais models por filialId.
-            if (m === "filial") {
-              a.where = { AND: [a.where ?? {}, { id: filialId }] };
-            } else {
-              a.where = { AND: [a.where ?? {}, { filialId }] };
-            }
-            return query(a);
+            return query(args);
           }
-          return query(args);
+
+          const a = (args ?? {}) as { where?: Record<string, unknown> };
+          let scopeWhere: Record<string, unknown>;
+          if (scope === "id") scopeWhere = { id: filialId };
+          else if (scope === "filialId") scopeWhere = { filialId };
+          else /* "usina" */ scopeWhere = { usina: { filialId } };
+
+          a.where = { AND: [a.where ?? {}, scopeWhere] };
+          return query(a);
         },
       },
     },
   }) as unknown as PrismaClient;
+}
+
+/**
+ * Helper pra crud factory — devolve `true` se o user pode operar sobre o
+ * registro com aquele id. Usa scopedPrisma + findFirst.
+ */
+export async function userCanAccessId(
+  user: ScopedUser,
+  modelLower: string,
+  id: string,
+): Promise<boolean> {
+  if (!user || user.role === "admin") return true;
+  if (!user.filialId) return false;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = scopedPrisma(user) as any;
+  const delegate = db[modelLower];
+  if (!delegate?.findFirst) return false;
+  const found = await delegate.findFirst({ where: { id }, select: { id: true } });
+  return !!found;
+}
+
+/**
+ * Decide se o input de `create` precisa ser sobrescrito com o filialId do
+ * usuário (defesa contra gestor_filial criando registro em outra filial).
+ * Retorna `data` com filialId/usinaId forçado quando aplicável.
+ */
+export function applyCreateScope(
+  user: ScopedUser,
+  modelLower: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!user || user.role === "admin" || !user.filialId) return data;
+  const scope = MODEL_SCOPE[modelLower];
+  if (!scope) return data;
+  if (scope === "filialId") {
+    return { ...data, filialId: user.filialId };
+  }
+  // Para "usina"-scoped, se a usinaId fornecida não pertencer à filial do
+  // user, o create vai falhar no pre-check (userCanAccessId no usinaId).
+  return data;
 }

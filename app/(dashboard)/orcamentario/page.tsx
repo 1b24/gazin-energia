@@ -1,15 +1,19 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { OrcamentoTable, type OrcamentoRow } from "./orcamento-table";
 
 export default async function OrcamentarioPage() {
+  const session = await auth();
+  const db = scopedPrisma(session?.user);
+
   const [rows, usinaOptions] = await Promise.all([
-    prisma.orcamento.findMany({
+    db.orcamento.findMany({
       include: { usina: { select: { id: true, nome: true } } },
       orderBy: [{ mes: "asc" }, { usinaId: "asc" }],
     }),
-    prisma.usina.findMany({
+    db.usina.findMany({
       where: { deletedAt: null },
       select: { id: true, nome: true },
       orderBy: { nome: "asc" },

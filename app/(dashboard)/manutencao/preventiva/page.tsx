@@ -1,15 +1,19 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { PreventivaTable, type PreventivaRow } from "./preventiva-table";
 
 export default async function PreventivaPage() {
+  const session = await auth();
+  const db = scopedPrisma(session?.user);
+
   const [rows, usinaOptions] = await Promise.all([
-    prisma.manutencaoPreventiva.findMany({
+    db.manutencaoPreventiva.findMany({
       include: { usina: { select: { id: true, nome: true } } },
       orderBy: [{ status: "asc" }, { dataExecucao: "desc" }],
     }),
-    prisma.usina.findMany({
+    db.usina.findMany({
       where: { deletedAt: null },
       select: { id: true, nome: true },
       orderBy: { nome: "asc" },

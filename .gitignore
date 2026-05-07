@@ -54,3 +54,4 @@ next-env.d.ts
 
 # uploads locais (dev). Em produção, R2 — vide .env.example.
 /public/uploads/
+/private-uploads/

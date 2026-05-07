@@ -1,11 +1,15 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { FornecedoresTable, type FornecedorRow } from "./fornecedores-table";
 
 export default async function FornecedoresPage() {
+  const session = await auth();
+  const db = scopedPrisma(session?.user);
+
   const [rows, filialOptions] = await Promise.all([
-    prisma.fornecedor.findMany({
+    db.fornecedor.findMany({
       include: {
         abrangenciaFilial: {
           select: { id: true, codigo: true, mercadoLivre: true },
@@ -13,7 +17,7 @@ export default async function FornecedoresPage() {
       },
       orderBy: [{ status: "asc" }, { nome: "asc" }],
     }),
-    prisma.filial.findMany({
+    db.filial.findMany({
       where: { deletedAt: null },
       select: { id: true, codigo: true, mercadoLivre: true },
       orderBy: { codigo: "asc" },

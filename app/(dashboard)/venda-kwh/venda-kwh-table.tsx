@@ -96,7 +96,7 @@ const columns: ColumnDef<VendaKwhRow, unknown>[] = [
     cell: ({ row }) => {
       const url = row.original.notaFiscalUrl;
       if (!url) return "—";
-      const isUploaded = url.startsWith("/uploads/");
+      const isUploaded = (url.startsWith("/api/files/") || url.startsWith("/uploads/"));
       const filename = url.split("/").pop() ?? url;
       const display =
         filename.length > 28 ? `${filename.slice(0, 26)}…` : filename;

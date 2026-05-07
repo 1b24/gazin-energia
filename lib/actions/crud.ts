@@ -30,11 +30,17 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import {
+  applyCreateScope,
+  prisma,
+  scopedPrisma,
+  userCanAccessId,
+} from "@/lib/db";
 import { exportRows, type ExportFormat } from "@/lib/exports";
 import { isStub } from "@/lib/modules/status";
 
-export type CrudActor = { id: string; role: string } | null;
+export type CrudActor = { id: string; role: string; filialId?: string | null } | null;
 
 export interface CrudHooks {
   /** Resolve o usuário atual a partir do contexto da request (NextAuth na T5). */
@@ -116,8 +122,35 @@ export function createCrudActions<S extends z.ZodObject>(
     }
   }
 
+  /**
+   * Actor padrão usa a session do NextAuth. Pode ser sobrescrito via hook.
+   */
   async function actor(): Promise<CrudActor> {
-    return (await effectiveHooks().getActor?.()) ?? null;
+    const fromHook = await effectiveHooks().getActor?.();
+    if (fromHook) return fromHook;
+    const session = await auth();
+    if (!session?.user) return null;
+    return {
+      id: session.user.id,
+      role: session.user.role,
+      filialId: session.user.filialId,
+    };
+  }
+
+  function modelLower() {
+    return prismaModel.charAt(0).toLowerCase() + prismaModel.slice(1);
+  }
+
+  /** Lança se o user não pode acessar o registro (via scopedPrisma). */
+  async function ensureCanAccess(id: string) {
+    const a = await actor();
+    if (!a) {
+      throw new Error("Não autenticado.");
+    }
+    const ok = await userCanAccessId(a, modelLower(), id);
+    if (!ok) {
+      throw new Error("Não autorizado: registro fora do escopo do usuário.");
+    }
   }
 
   async function audit(
@@ -139,7 +172,11 @@ export function createCrudActions<S extends z.ZodObject>(
 
   async function create(input: unknown) {
     ensureNotStub();
-    const data = schema.parse(input);
+    const a = await actor();
+    if (!a) throw new Error("Não autenticado.");
+    let data = schema.parse(input) as Record<string, unknown>;
+    // RBAC: força filialId/usinaId pra dentro do escopo do user.
+    data = applyCreateScope(a, modelLower(), data);
     const delegate = delegateFor(prismaModel);
     const created = await delegate.create({ data });
     await audit("create", created.id, null, created);
@@ -149,6 +186,7 @@ export function createCrudActions<S extends z.ZodObject>(
 
   async function update(id: string, input: unknown) {
     ensureNotStub();
+    await ensureCanAccess(id);
     const data = schema.partial().parse(input);
     const delegate = delegateFor(prismaModel);
     const before = await delegate.findUnique({ where: { id } });
@@ -160,6 +198,7 @@ export function createCrudActions<S extends z.ZodObject>(
 
   async function softDelete(id: string) {
     ensureNotStub();
+    await ensureCanAccess(id);
     const delegate = delegateFor(prismaModel);
     const before = await delegate.findUnique({ where: { id } });
     const after = await delegate.update({
@@ -173,6 +212,7 @@ export function createCrudActions<S extends z.ZodObject>(
 
   async function restore(id: string) {
     ensureNotStub();
+    await ensureCanAccess(id);
     const delegate = delegateFor(prismaModel);
     const before = await delegate.findUnique({ where: { id } });
     const after = await delegate.update({
@@ -186,7 +226,7 @@ export function createCrudActions<S extends z.ZodObject>(
 
   async function bulkDelete(ids: string[]) {
     ensureNotStub();
-    // softDelete já chama bustCache, mas isso é idempotente.
+    // softDelete já valida cada id via ensureCanAccess + chama bustCache.
     for (const id of ids) await softDelete(id);
     return { count: ids.length };
   }
@@ -196,11 +236,17 @@ export function createCrudActions<S extends z.ZodObject>(
     format: ExportFormat,
     where?: unknown,
   ) {
-    const delegate = delegateFor(prismaModel);
+    const a = await actor();
+    if (!a) throw new Error("Não autenticado.");
+    // Export respeita escopo via scopedPrisma (admin = tudo).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = scopedPrisma(a) as any;
+    const delegate = db[modelLower()];
+    if (!delegate?.findMany) throw new Error(`Model "${prismaModel}" inacessível.`);
     const filter =
       ids === "all"
         ? where
-        : { ...(where ?? {}), id: { in: ids } };
+        : { ...((where as Record<string, unknown>) ?? {}), id: { in: ids } };
     const rows = (await delegate.findMany({ where: filter })) as Record<
       string,
       unknown

@@ -1,17 +1,21 @@
-import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
+import { scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { ConsumoTable, type ConsumoRow } from "./consumo-table";
 
 export default async function ConsumoPage() {
+  const session = await auth();
+  const db = scopedPrisma(session?.user);
+
   const [rows, filialOptions] = await Promise.all([
-    prisma.consumo.findMany({
+    db.consumo.findMany({
       include: {
         filial: { select: { id: true, codigo: true, mercadoLivre: true } },
       },
       orderBy: [{ ano: "desc" }, { mes: "desc" }, { filialId: "asc" }],
     }),
-    prisma.filial.findMany({
+    db.filial.findMany({
       where: { deletedAt: null },
       select: { id: true, codigo: true, mercadoLivre: true },
       orderBy: { codigo: "asc" },

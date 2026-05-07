@@ -2,16 +2,22 @@
 
 /**
  * Upload server action — recebe um arquivo via FormData e devolve a URL
- * pública. Usado pelo `<FileField />` do entity-form.
+ * (rota `/api/files/<bucket>/<key>`, protegida por sessão).
  *
- * `bucket` é livre — convencionalmente o nome da entidade ("venda-kwh",
- * "fornecedores", etc) pra que cada model tenha sua subpasta.
+ * Backend (local FS ou S3/R2) é escolhido em runtime pelo `lib/storage.ts`.
+ * Apenas usuários autenticados podem fazer upload.
  */
-import { saveLocalFile } from "@/lib/storage";
+import { auth } from "@/lib/auth";
+import { saveFile } from "@/lib/storage";
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB — suficiente pra PDFs/JPGs de NF.
 
 export async function uploadFile(formData: FormData): Promise<string> {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Não autenticado.");
+  }
+
   const file = formData.get("file");
   const bucket = String(formData.get("bucket") ?? "default");
 
@@ -24,6 +30,6 @@ export async function uploadFile(formData: FormData): Promise<string> {
     );
   }
 
-  const saved = await saveLocalFile(file, bucket);
+  const saved = await saveFile(file, bucket);
   return saved.url;
 }
