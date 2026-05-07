@@ -114,6 +114,7 @@ model Filial {
 
   usinas                  Usina[]
   consumos                Consumo[]
+  injecoes                Injecao[]
   fornecedoresAbrangencia Fornecedor[]
 
   @@index([codigo])
@@ -193,6 +194,7 @@ model Fornecedor {
 
   consertos       ConsertoEquipamento[]
   manutencoesCorr ManutencaoCorretiva[]
+  injecoes        Injecao[]
 
   @@index([cnpj])
   @@index([status])
@@ -311,21 +313,32 @@ model Injecao {
   ano             Int?
   mes             String?
   uc              String?
-  filialDescricao String?
-  fornecedorRaw   String?
+  municipio       String?
   consumoKwhP     Decimal? @db.Decimal(12, 2)
   consumoKwhP1    Decimal? @db.Decimal(12, 2)
   consumoTotalKwh Decimal? @db.Decimal(12, 2)
   valor           Decimal? @db.Decimal(15, 2)
   valor1          Decimal? @db.Decimal(15, 2)
   valor2          Decimal? @db.Decimal(15, 2)
-  municipio       String?
   anexoFechamento String?
+
+  filial          Filial? @relation(fields: [filialId], references: [id], onDelete: Restrict)
+  filialId        String?
+  /// Valor original do source quando não bate com Filial.codigo
+  /// (ex: "Auto Posto 04900").
+  filialCodigoRaw String?
+
+  fornecedor    Fornecedor? @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  fornecedorId  String?
+  /// Valor original do source quando não bate com Fornecedor.nome.
+  fornecedorRaw String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  @@index([filialId])
+  @@index([fornecedorId])
   @@index([ano, mes])
   @@index([uc])
   @@index([deletedAt])

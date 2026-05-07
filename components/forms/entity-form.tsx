@@ -45,6 +45,12 @@ export type FormFieldType =
   | "cnpj"
   | "file";
 
+/** Item de `select` — pode carregar campos extras pra cross-field linking. */
+export type FormFieldOption = {
+  value: string;
+  label: string;
+} & Record<string, unknown>;
+
 export interface FormFieldConfig {
   name: string;
   label: string;
@@ -52,13 +58,20 @@ export interface FormFieldConfig {
   required?: boolean;
   placeholder?: string;
   helpText?: string;
-  options?: { value: string; label: string }[]; // para `select`
+  options?: FormFieldOption[]; // para `select`
   /** colspan: 1 = metade, 2 = inteira (grid de 2 colunas no desktop) */
   span?: 1 | 2;
   /** Para `file`: subpasta dentro de `public/uploads/`. Default = "default". */
   bucket?: string;
   /** Para `file`: tipos aceitos (atributo `accept` do input). */
   accept?: string;
+  /**
+   * Para `select`: ao mudar, copia chaves arbitrárias da option escolhida pra
+   * outros campos do form. Ex: `{ uc: "uc", municipio: "municipio" }` →
+   * quando este field mudar, o form atualiza `uc` e `municipio` com os valores
+   * `option.uc` e `option.municipio` da option selecionada.
+   */
+  linksTo?: Record<string, string>;
 }
 
 export interface EntityFormProps<S extends z.ZodObject> {
@@ -92,6 +105,7 @@ export function EntityForm<S extends z.ZodObject>({
     control,
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver, defaultValues });
 
@@ -118,7 +132,7 @@ export function EntityForm<S extends z.ZodObject>({
               {f.required && <span className="ml-0.5 text-destructive">*</span>}
             </Label>
 
-            {renderField(f, register, control)}
+            {renderField(f, register, control, setValue)}
 
             {f.helpText && !errMsg && (
               <p className="text-xs text-muted-foreground">{f.helpText}</p>
@@ -154,6 +168,8 @@ function renderField(
   register: any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   control: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setValue: any,
 ) {
   switch (f.type) {
     case "text":
@@ -217,7 +233,27 @@ function renderField(
               // do item selecionado em vez do raw value (ex: cuid de Filial).
               items={f.options ?? []}
               value={field.value ?? ""}
-              onValueChange={(v) => field.onChange(v || null)}
+              onValueChange={(v) => {
+                field.onChange(v || null);
+                // Cross-field linking: copia chaves da option escolhida pra
+                // outros campos do form.
+                if (f.linksTo && v) {
+                  const opt = (f.options ?? []).find((o) => o.value === v);
+                  if (opt) {
+                    for (const [optKey, formField] of Object.entries(f.linksTo)) {
+                      const val = opt[optKey];
+                      // Não sobrescreve com undefined/null — preserva o que o
+                      // user já tinha digitado se o source não tem o campo.
+                      if (val != null && val !== "") {
+                        setValue(formField, val, {
+                          shouldDirty: true,
+                          shouldValidate: false,
+                        });
+                      }
+                    }
+                  }
+                }
+              }}
             >
               <SelectTrigger id={f.name}>
                 <SelectValue placeholder={f.placeholder ?? "Selecione..."} />

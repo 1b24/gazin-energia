@@ -498,23 +498,45 @@ async function importConsumo(prisma: PrismaClient) {
 
 async function importInjecao(prisma: PrismaClient) {
   const rows = await loadJson("injecao.json");
+  const filialMap = await buildFilialCodeMap(prisma);
+  const fornecedorMap = await buildFornecedorNameMap(prisma);
+
   for (const r of rows) {
     const zohoId = asString(r, "ID");
     if (!zohoId) continue;
+
+    const filialCodigoRaw = asString(r, "Filial");
+    // Filial bate quando o source tem o código numérico (ex: "10006").
+    // Quando é descritivo ("Auto Posto 04900"), filialId fica null.
+    const filialId = filialCodigoRaw ? filialMap.get(filialCodigoRaw) : undefined;
+    if (filialCodigoRaw && !filialId) {
+      logUnmatched("Injecao", "Filial", filialCodigoRaw);
+    }
+
+    const fornecedorRaw = asString(r, "fornecedor");
+    const fornecedorId = fornecedorRaw
+      ? fornecedorMap.get(fornecedorRaw.trim().toLowerCase())
+      : undefined;
+    if (fornecedorRaw && !fornecedorId) {
+      logUnmatched("Injecao", "fornecedor", fornecedorRaw);
+    }
+
     const data = {
       ano: asInt(r, "Ano"),
       mes: asString(r, "M_s"),
       uc: asString(r, "UC"),
-      filialDescricao: asString(r, "Filial"),
-      fornecedorRaw: asString(r, "fornecedor"),
+      municipio: asString(r, "Munic_pio"),
       consumoKwhP: asNumber(r, "Consumo_KWH_P"),
       consumoKwhP1: asNumber(r, "Consumo_KWH_P1"),
       consumoTotalKwh: asNumber(r, "Consumo_total_KWH"),
       valor: asNumber(r, "Valor"),
       valor1: asNumber(r, "Valor1"),
       valor2: asNumber(r, "Valor2"),
-      municipio: asString(r, "Munic_pio"),
       anexoFechamento: asString(r, "Anexo_fechamento"),
+      filialId: filialId ?? null,
+      filialCodigoRaw,
+      fornecedorId: fornecedorId ?? null,
+      fornecedorRaw,
     };
     await prisma.injecao.upsert({
       where: { zohoId },
@@ -523,6 +545,18 @@ async function importInjecao(prisma: PrismaClient) {
     });
     track("Injecao").inserted++;
   }
+}
+
+async function buildFornecedorNameMap(prisma: PrismaClient) {
+  const all = await prisma.fornecedor.findMany({
+    where: { nome: { not: null } },
+    select: { id: true, nome: true },
+  });
+  const map = new Map<string, string>();
+  for (const f of all) {
+    if (f.nome) map.set(f.nome.trim().toLowerCase(), f.id);
+  }
+  return map;
 }
 
 async function importOrcamento(prisma: PrismaClient) {

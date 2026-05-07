@@ -1,18 +1,26 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import type { Injecao } from "@prisma/client";
+import type { Filial, Fornecedor, Injecao } from "@prisma/client";
 import { Paperclip } from "lucide-react";
 
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
-import { injecaoFormFields, injecaoSchema } from "@/lib/schemas/injecao";
+import {
+  buildInjecaoFormFields,
+  injecaoSchema,
+  type FilialPickerOption,
+  type FornecedorPickerOption,
+} from "@/lib/schemas/injecao";
 import type { Serialized } from "@/lib/serialize";
 
 import * as actions from "./actions";
 
-export type InjecaoRow = Serialized<Injecao>;
+export type InjecaoRow = Serialized<Injecao> & {
+  filial: Pick<Filial, "id" | "codigo" | "mercadoLivre"> | null;
+  fornecedor: Pick<Fornecedor, "id" | "nome"> | null;
+};
 
 const fmtKwh = (n: number | null | undefined) =>
   n == null
@@ -56,9 +64,27 @@ function FileLink({ url }: { url: string | null | undefined }) {
 
 const columns: ColumnDef<InjecaoRow, unknown>[] = [
   {
-    accessorKey: "filialDescricao",
+    id: "filial",
     header: "Filial",
-    cell: ({ row }) => row.original.filialDescricao ?? "—",
+    cell: ({ row }) => {
+      const f = row.original.filial;
+      if (f) {
+        return (
+          <span className="text-xs">
+            {f.codigo ?? "—"}
+            {f.mercadoLivre ? ` · ${f.mercadoLivre}` : ""}
+          </span>
+        );
+      }
+      const raw = row.original.filialCodigoRaw;
+      return raw ? (
+        <span className="text-xs text-muted-foreground" title="Sem vínculo">
+          {raw}
+        </span>
+      ) : (
+        "—"
+      );
+    },
   },
   {
     accessorKey: "ano",
@@ -86,11 +112,20 @@ const columns: ColumnDef<InjecaoRow, unknown>[] = [
       ),
   },
   {
-    accessorKey: "fornecedorRaw",
+    id: "fornecedor",
     header: "Fornecedor",
-    cell: ({ row }) => row.original.fornecedorRaw ?? "—",
+    cell: ({ row }) => {
+      const f = row.original.fornecedor;
+      if (f) return f.nome ?? "—";
+      return row.original.fornecedorRaw ? (
+        <span className="text-xs text-muted-foreground" title="Sem vínculo">
+          {row.original.fornecedorRaw}
+        </span>
+      ) : (
+        "—"
+      );
+    },
   },
-  // --- Consumo (kWh) ---
   {
     accessorKey: "consumoKwhP",
     header: "Consumo P (kWh)",
@@ -106,7 +141,6 @@ const columns: ColumnDef<InjecaoRow, unknown>[] = [
     header: "Total (kWh)",
     cell: ({ row }) => fmtKwh(row.original.consumoTotalKwh),
   },
-  // --- Valores (R$) ---
   {
     accessorKey: "valor",
     header: "Valor",
@@ -147,12 +181,27 @@ const HIDDEN_BY_DEFAULT = {
 function renderDetails(i: InjecaoRow) {
   return (
     <dl>
-      <DetailField label="Filial (descrição)" value={i.filialDescricao} />
+      <DetailField
+        label="Filial"
+        value={
+          i.filial
+            ? `${i.filial.codigo ?? "—"} · ${i.filial.mercadoLivre ?? ""}`.trim()
+            : i.filialCodigoRaw
+              ? `${i.filialCodigoRaw} (sem vínculo)`
+              : null
+        }
+      />
       <DetailField label="Ano" value={i.ano} />
       <DetailField label="Mês" value={i.mes} />
       <DetailField label="UC" value={i.uc} />
       <DetailField label="Município" value={i.municipio} />
-      <DetailField label="Fornecedor" value={i.fornecedorRaw} />
+      <DetailField
+        label="Fornecedor"
+        value={
+          i.fornecedor?.nome ??
+          (i.fornecedorRaw ? `${i.fornecedorRaw} (sem vínculo)` : null)
+        }
+      />
       <DetailField
         label="Consumo P"
         value={i.consumoKwhP != null ? `${fmtKwh(i.consumoKwhP)} kWh` : null}
@@ -178,14 +227,25 @@ function renderDetails(i: InjecaoRow) {
   );
 }
 
-export function InjecaoTable({ rows }: { rows: InjecaoRow[] }) {
+interface Props {
+  rows: InjecaoRow[];
+  filialOptions: FilialPickerOption[];
+  fornecedorOptions: FornecedorPickerOption[];
+}
+
+export function InjecaoTable({
+  rows,
+  filialOptions,
+  fornecedorOptions,
+}: Props) {
+  const fields = buildInjecaoFormFields(filialOptions, fornecedorOptions);
   return (
     <EntityPage<InjecaoRow, typeof injecaoSchema>
       title="Controle de Injeção"
       prismaModel="Injecao"
       rawFileName="injecao.json"
       schema={injecaoSchema}
-      fields={injecaoFormFields}
+      fields={fields}
       rows={rows}
       columns={columns}
       initialColumnVisibility={HIDDEN_BY_DEFAULT}
