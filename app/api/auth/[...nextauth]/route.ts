@@ -1,10 +1,9 @@
 /**
- * NextAuth route stub. Real wiring lands in a later task — see BRIEF.md.
+ * Catch-all do NextAuth v5 — re-exporta os handlers do `lib/auth.ts`.
  */
-export async function GET() {
-  return new Response("Not configured", { status: 501 });
-}
+import { handlers } from "@/lib/auth";
 
-export async function POST() {
-  return new Response("Not configured", { status: 501 });
-}
+export const { GET, POST } = handlers;
+
+// Node runtime — bcrypt + Prisma não rodam em Edge.
+export const runtime = "nodejs";

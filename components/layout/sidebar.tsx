@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { MODULES } from "@/lib/modules/registry";
 import type { ModuleDefinition } from "@/lib/modules/types";
+import type { Role } from "@prisma/client";
 
 function ModuleIcon({ name, className }: { name: string; className?: string }) {
   const Icon = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[name];
@@ -90,8 +91,15 @@ function ModuleItem({ mod }: { mod: ModuleDefinition }) {
   );
 }
 
-export function Sidebar() {
-  const items = useMemo(() => MODULES, []);
+export function Sidebar({ role }: { role?: Role | null } = {}) {
+  const items = useMemo(() => {
+    if (!role) return MODULES;
+    return MODULES.filter((m) => {
+      const allowed = m.permissions?.view;
+      if (!allowed) return true; // default = todos
+      return allowed.includes(role);
+    });
+  }, [role]);
   return (
     <aside className="flex h-screen w-64 shrink-0 flex-col border-r bg-background">
       <div className="flex h-14 items-center border-b px-4">

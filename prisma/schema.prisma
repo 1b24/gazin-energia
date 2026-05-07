@@ -81,6 +81,12 @@ enum StatusEntidade {
   inativo
 }
 
+enum Role {
+  admin
+  gestor_filial
+  operacional
+}
+
 // =============================================================================
 // CORE
 // =============================================================================
@@ -116,6 +122,7 @@ model Filial {
   consumos                Consumo[]
   injecoes                Injecao[]
   fornecedoresAbrangencia Fornecedor[]
+  users                   User[]
 
   @@index([codigo])
   @@index([cnpj])
@@ -554,6 +561,26 @@ model ManutencaoCorretiva {
 
   @@index([usinaId])
   @@index([fornecedorId])
+  @@index([deletedAt])
+}
+
+/// Usuário do sistema. Auth + RBAC (Tarefa 5 do BRIEF).
+model User {
+  id       String @id @default(cuid())
+  email    String @unique
+  name     String
+  password String // hash bcrypt
+  role     Role   @default(operacional)
+
+  filial   Filial? @relation(fields: [filialId], references: [id], onDelete: Restrict)
+  filialId String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([role])
+  @@index([filialId])
   @@index([deletedAt])
 }
 
