@@ -5,6 +5,7 @@ import { z } from "zod";
 import { StatusManutencao } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
 import { createCrudActions } from "@/lib/actions/crud";
 import { prisma, userCanAccessId } from "@/lib/db";
 import { cronogramaLimpezaSchema } from "@/lib/schemas/cronograma-limpeza";
@@ -90,6 +91,11 @@ export async function updateItens(
     throw new Error(`Cronograma ${cronogramaId} não encontrado ou arquivado.`);
   }
 
+  const beforeItens = await prisma.limpezaItem.findMany({
+    where: { cronogramaId },
+    orderBy: { ordem: "asc" },
+  });
+
   let count = 0;
   for (const it of parsed) {
     const allEmpty =
@@ -120,6 +126,19 @@ export async function updateItens(
     }
     count++;
   }
+
+  const afterItens = await prisma.limpezaItem.findMany({
+    where: { cronogramaId },
+    orderBy: { ordem: "asc" },
+  });
+  await recordAudit({
+    actor: { id: session.user.id },
+    entityType: "CronogramaLimpeza",
+    entityId: cronogramaId,
+    action: "update",
+    before: { itens: beforeItens },
+    after: { itens: afterItens },
+  });
 
   revalidatePath("/manutencao/limpeza");
   return { count };

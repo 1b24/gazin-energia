@@ -7,7 +7,7 @@
  *  - Detalhes:    read-only por padrão; troca pra `<EntityForm />` quando
  *                 `editing` está ativo (Opção A — toggle no header do drawer).
  *  - Relacionados: uma lista por relação configurada (ex: "Geração", "Vendas").
- *  - Histórico:    audit log da entidade — placeholder até a Tarefa 6 entregar.
+ *  - Histórico:    audit log da entidade (Tarefa 6).
  */
 import { Pencil, X } from "lucide-react";
 import { type ReactNode } from "react";
@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import { HistoryPanel } from "./history-panel";
+
 export interface EntityRelation<T> {
   /** Texto da aba (ex: "Geração", "Manutenções"). */
   label: string;
@@ -41,6 +43,8 @@ export interface EntityDrawerProps<T, S extends z.ZodObject> {
   /** Render-prop pra montar a aba "Detalhes" no modo read-only. */
   details: (entity: T) => ReactNode;
   relations?: EntityRelation<T>[];
+  /** Nome do model Prisma — usado pra carregar audit log. */
+  prismaModel?: string;
   /** Modo edit ativo. Quando `true`, "Detalhes" mostra o form. */
   editing?: boolean;
   /** Callback do toggle Edit/Cancel no header. */
@@ -61,6 +65,7 @@ export function EntityDrawer<T extends { id: string }, S extends z.ZodObject>({
   title,
   details,
   relations = [],
+  prismaModel,
   editing = false,
   onEditingChange,
   schema,
@@ -158,10 +163,17 @@ export function EntityDrawer<T extends { id: string }, S extends z.ZodObject>({
 
               {!editing && (
                 <TabsContent value="historico" className="px-6 py-4">
-                  <p className="text-sm text-muted-foreground">
-                    Audit log será exibido aqui quando a Tarefa 6 (audit) for
-                    implementada.
-                  </p>
+                  {prismaModel ? (
+                    <HistoryPanel
+                      key={entity.id}
+                      prismaModel={prismaModel}
+                      entityId={entity.id}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Sem prismaModel configurado.
+                    </p>
+                  )}
                 </TabsContent>
               )}
             </ScrollArea>

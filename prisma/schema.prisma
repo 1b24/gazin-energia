@@ -87,6 +87,14 @@ enum Role {
   operacional
 }
 
+enum AuditAction {
+  create
+  update
+  soft_delete
+  restore
+  hard_delete
+}
+
 // =============================================================================
 // CORE
 // =============================================================================
@@ -579,9 +587,30 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  auditLogs AuditLog[]
+
   @@index([role])
   @@index([filialId])
   @@index([deletedAt])
+}
+
+/// Audit log — append-only. Toda mutação no CRUD genérico (lib/actions/crud.ts)
+/// e nas custom actions auditadas grava aqui. NUNCA tem delete; visualização
+/// respeita RBAC (gestor_filial só vê histórico do próprio escopo).
+model AuditLog {
+  id         String      @id @default(cuid())
+  entityType String
+  entityId   String
+  action     AuditAction
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  before     Json?
+  after      Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 // STUB — schema preliminar, expandir quando JSON real for fornecido

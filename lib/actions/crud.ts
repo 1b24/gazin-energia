@@ -31,6 +31,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
 import {
   applyCreateScope,
   prisma,
@@ -160,6 +161,17 @@ export function createCrudActions<S extends z.ZodObject>(
     after: unknown,
   ) {
     const a = await actor();
+    if (a) {
+      await recordAudit({
+        actor: { id: a.id },
+        entityType: prismaModel,
+        entityId,
+        action,
+        before,
+        after,
+      });
+    }
+    // Hook custom continua funcionando (testes / extensions).
     await effectiveHooks().onMutation?.({
       actor: a,
       model: prismaModel,

@@ -113,6 +113,7 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
   return (
     <ActiveEntityPage
       title={title}
+      prismaModel={prismaModel}
       rows={rows}
       columns={columns}
       schema={schema}
@@ -129,6 +130,7 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
 
 interface ActiveProps<T extends { id: string }, S extends z.ZodObject> {
   title: string;
+  prismaModel: string;
   rows: T[];
   columns: ColumnDef<T, unknown>[];
   schema?: S;
@@ -144,6 +146,7 @@ function ActiveEntityPage<
   S extends z.ZodObject,
 >({
   title,
+  prismaModel,
   rows,
   columns,
   schema,
@@ -329,6 +332,7 @@ function ActiveEntityPage<
         }}
         entity={drawerEntity}
         title={title.replace(/s$/, "")}
+        prismaModel={prismaModel}
         details={
           details ??
           (() => (

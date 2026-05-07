@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
 import { createCrudActions } from "@/lib/actions/crud";
 import { prisma, userCanAccessId } from "@/lib/db";
 import { geracaoSchema } from "@/lib/schemas/geracao";
@@ -66,6 +67,13 @@ export async function updateDias(
     throw new Error(`Geração ${geracaoId} não encontrada ou arquivada.`);
   }
 
+  // Snapshot dos dias antes da edição pra audit before/after.
+  const beforeDias = await prisma.geracaoDia.findMany({
+    where: { geracaoId },
+    select: { dia: true, kwh: true },
+    orderBy: { dia: "asc" },
+  });
+
   // Upsert por (geracaoId, dia). Se kwh é null, remove o registro pra manter
   // a tabela limpa (em vez de armazenar NULL) — o Prisma não permite delete
   // condicional no upsert, então rodamos por linha.
@@ -84,6 +92,22 @@ export async function updateDias(
     }
     count++;
   }
+
+  // Audit do update de dias. Audit é "update" da Geracao (entidade pai) com
+  // before/after dos dias modificados.
+  const afterDias = await prisma.geracaoDia.findMany({
+    where: { geracaoId },
+    select: { dia: true, kwh: true },
+    orderBy: { dia: "asc" },
+  });
+  await recordAudit({
+    actor: { id: session.user.id },
+    entityType: "Geracao",
+    entityId: geracaoId,
+    action: "update",
+    before: { dias: beforeDias },
+    after: { dias: afterDias },
+  });
 
   revalidatePath("/geracao");
   return { count };
