@@ -24,10 +24,19 @@
  *   antes de devolver — gestor_filial/operacional não vê histórico fora do
  *   escopo. Admins veem tudo.
  */
-import type { AuditAction, Prisma } from "@prisma/client";
+import type {
+  AuditAction,
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
 
 import { auth } from "@/lib/auth";
 import { prisma, userCanAccessId } from "@/lib/db";
+
+/** Cliente Prisma OU transação. Aceito por `recordAudit` para atomicidade. */
+type PrismaLike =
+  | PrismaClient
+  | Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
 const SENSITIVE_KEY_RE =
   /(^|_|[A-Z])(password|senha|hash|token|secret|accesskey|secretkey|apikey)/i;
@@ -60,32 +69,37 @@ export interface AuditActor {
 }
 
 /**
- * Grava um evento no AuditLog. Chamado pelo factory CRUD e por custom actions.
- * Falhas são logadas mas NÃO propagam — o audit é best-effort, não trava
- * mutação que já foi commitada (alternativa exigiria transação distribuída).
+ * Grava um evento no AuditLog. Chamado pelo factory CRUD e por custom actions
+ * SEMPRE dentro de uma transação Prisma (`tx` argumento). Audit é OBRIGATÓRIO:
+ * se falha, a transação é revertida — mutação não fica sem log.
+ *
+ * Transação atômica é viável porque AuditLog vive no mesmo DB que as entidades
+ * de negócio (sem necessidade de distributed tx). Quando `tx` não é passado
+ * (callers fora de transação, raros), grava com prisma global; falha sobe
+ * stack normalmente — sem catch silencioso.
  */
-export async function recordAudit(params: {
-  actor: AuditActor;
-  entityType: string;
-  entityId: string;
-  action: AuditAction;
-  before?: unknown;
-  after?: unknown;
-}): Promise<void> {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        entityType: params.entityType,
-        entityId: params.entityId,
-        action: params.action,
-        userId: params.actor.id,
-        before: toJsonValue(sanitize(params.before)),
-        after: toJsonValue(sanitize(params.after)),
-      },
-    });
-  } catch (err) {
-    console.error("[audit] falha ao gravar:", err);
-  }
+export async function recordAudit(
+  params: {
+    actor: AuditActor;
+    entityType: string;
+    entityId: string;
+    action: AuditAction;
+    before?: unknown;
+    after?: unknown;
+  },
+  tx?: PrismaLike,
+): Promise<void> {
+  const client = (tx ?? prisma) as PrismaClient;
+  await client.auditLog.create({
+    data: {
+      entityType: params.entityType,
+      entityId: params.entityId,
+      action: params.action,
+      userId: params.actor.id,
+      before: toJsonValue(sanitize(params.before)),
+      after: toJsonValue(sanitize(params.after)),
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------

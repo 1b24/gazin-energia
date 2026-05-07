@@ -91,53 +91,59 @@ export async function updateItens(
     throw new Error(`Cronograma ${cronogramaId} não encontrado ou arquivado.`);
   }
 
-  const beforeItens = await prisma.limpezaItem.findMany({
-    where: { cronogramaId },
-    orderBy: { ordem: "asc" },
-  });
+  // Mutações + audit numa transação. Falha em qualquer ponto reverte tudo.
+  const count = await prisma.$transaction(async (tx) => {
+    const beforeItens = await tx.limpezaItem.findMany({
+      where: { cronogramaId },
+      orderBy: { ordem: "asc" },
+    });
 
-  let count = 0;
-  for (const it of parsed) {
-    const allEmpty =
-      !it.dataPlanejada && !it.dataConclusao && !it.status && !it.fotoUrl;
-    if (allEmpty) {
-      // Se tudo vazio, remove o item pra manter a tabela limpa.
-      await prisma.limpezaItem.deleteMany({
-        where: { cronogramaId, ordem: it.ordem },
-      });
-    } else {
-      await prisma.limpezaItem.upsert({
-        where: { cronogramaId_ordem: { cronogramaId, ordem: it.ordem } },
-        create: {
-          cronogramaId,
-          ordem: it.ordem,
-          dataPlanejada: it.dataPlanejada,
-          dataConclusao: it.dataConclusao,
-          status: it.status,
-          fotoUrl: it.fotoUrl,
-        },
-        update: {
-          dataPlanejada: it.dataPlanejada,
-          dataConclusao: it.dataConclusao,
-          status: it.status,
-          fotoUrl: it.fotoUrl,
-        },
-      });
+    let n = 0;
+    for (const it of parsed) {
+      const allEmpty =
+        !it.dataPlanejada && !it.dataConclusao && !it.status && !it.fotoUrl;
+      if (allEmpty) {
+        await tx.limpezaItem.deleteMany({
+          where: { cronogramaId, ordem: it.ordem },
+        });
+      } else {
+        await tx.limpezaItem.upsert({
+          where: { cronogramaId_ordem: { cronogramaId, ordem: it.ordem } },
+          create: {
+            cronogramaId,
+            ordem: it.ordem,
+            dataPlanejada: it.dataPlanejada,
+            dataConclusao: it.dataConclusao,
+            status: it.status,
+            fotoUrl: it.fotoUrl,
+          },
+          update: {
+            dataPlanejada: it.dataPlanejada,
+            dataConclusao: it.dataConclusao,
+            status: it.status,
+            fotoUrl: it.fotoUrl,
+          },
+        });
+      }
+      n++;
     }
-    count++;
-  }
 
-  const afterItens = await prisma.limpezaItem.findMany({
-    where: { cronogramaId },
-    orderBy: { ordem: "asc" },
-  });
-  await recordAudit({
-    actor: { id: session.user.id },
-    entityType: "CronogramaLimpeza",
-    entityId: cronogramaId,
-    action: "update",
-    before: { itens: beforeItens },
-    after: { itens: afterItens },
+    const afterItens = await tx.limpezaItem.findMany({
+      where: { cronogramaId },
+      orderBy: { ordem: "asc" },
+    });
+    await recordAudit(
+      {
+        actor: { id: session.user.id },
+        entityType: "CronogramaLimpeza",
+        entityId: cronogramaId,
+        action: "update",
+        before: { itens: beforeItens },
+        after: { itens: afterItens },
+      },
+      tx,
+    );
+    return n;
   });
 
   revalidatePath("/manutencao/limpeza");

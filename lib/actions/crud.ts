@@ -86,11 +86,11 @@ type AnyDelegate = {
   count: (args?: { where?: unknown }) => Promise<number>;
 };
 
-function delegateFor(prismaModel: string): AnyDelegate {
+function delegateFor(prismaModel: string, client: unknown = prisma): AnyDelegate {
   const key = prismaModel.charAt(0).toLowerCase() + prismaModel.slice(1);
-  // O cliente Prisma 7 expõe os models pelo nome em camelCase.
-  const client = prisma as unknown as Record<string, AnyDelegate>;
-  const delegate = client[key];
+  // O cliente Prisma 7 expõe os models pelo nome em camelCase. Aceita um
+  // tx (interactive transaction) no lugar do client global.
+  const delegate = (client as Record<string, AnyDelegate>)[key];
   if (!delegate) {
     throw new Error(`PrismaClient não tem o model "${prismaModel}".`);
   }
@@ -154,32 +154,54 @@ export function createCrudActions<S extends z.ZodObject>(
     }
   }
 
-  async function audit(
+  /**
+   * Grava audit DENTRO de uma transação. Chamada pelos métodos CRUD com o
+   * `tx` ativo — falha aqui reverte a mutação. Hooks customizados (testes /
+   * extensions) ficam fora da tx (best-effort, não-bloqueante).
+   */
+  async function auditInTx(
+    tx: unknown,
+    actorId: string,
     action: "create" | "update" | "soft_delete" | "restore" | "hard_delete",
     entityId: string,
     before: unknown,
     after: unknown,
   ) {
-    const a = await actor();
-    if (a) {
-      await recordAudit({
-        actor: { id: a.id },
+    await recordAudit(
+      {
+        actor: { id: actorId },
         entityType: prismaModel,
         entityId,
         action,
         before,
         after,
+      },
+      tx as never,
+    );
+  }
+
+  async function fireHook(
+    actorVal: CrudActor,
+    action: "create" | "update" | "soft_delete" | "restore" | "hard_delete",
+    entityId: string,
+    before: unknown,
+    after: unknown,
+  ) {
+    const hook = effectiveHooks().onMutation;
+    if (!hook) return;
+    try {
+      await hook({
+        actor: actorVal,
+        model: prismaModel,
+        action,
+        entityId,
+        before,
+        after,
       });
+    } catch (err) {
+      // Hook é opcional/externo. Não pode reverter a tx do audit canônico.
+      console.error("[crud] hook onMutation falhou:", err);
     }
-    // Hook custom continua funcionando (testes / extensions).
-    await effectiveHooks().onMutation?.({
-      actor: a,
-      model: prismaModel,
-      action,
-      entityId,
-      before,
-      after,
-    });
   }
 
   async function create(input: unknown) {
@@ -187,53 +209,78 @@ export function createCrudActions<S extends z.ZodObject>(
     const a = await actor();
     if (!a) throw new Error("Não autenticado.");
     let data = schema.parse(input) as Record<string, unknown>;
-    // RBAC: força filialId/usinaId pra dentro do escopo do user.
     data = applyCreateScope(a, modelLower(), data);
-    const delegate = delegateFor(prismaModel);
-    const created = await delegate.create({ data });
-    await audit("create", created.id, null, created);
+
+    const created = await prisma.$transaction(async (tx) => {
+      const delegate = delegateFor(prismaModel, tx);
+      const c = await delegate.create({ data });
+      await auditInTx(tx, a.id, "create", c.id, null, c);
+      return c;
+    });
     bustCache();
+    await fireHook(a, "create", created.id, null, created);
     return created;
   }
 
   async function update(id: string, input: unknown) {
     ensureNotStub();
     await ensureCanAccess(id);
+    const a = await actor();
+    if (!a) throw new Error("Não autenticado.");
     const data = schema.partial().parse(input);
-    const delegate = delegateFor(prismaModel);
-    const before = await delegate.findUnique({ where: { id } });
-    const updated = await delegate.update({ where: { id }, data });
-    await audit("update", id, before, updated);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const delegate = delegateFor(prismaModel, tx);
+      const before = await delegate.findUnique({ where: { id } });
+      const after = await delegate.update({ where: { id }, data });
+      await auditInTx(tx, a.id, "update", id, before, after);
+      return { before, after };
+    });
     bustCache();
-    return updated;
+    await fireHook(a, "update", id, result.before, result.after);
+    return result.after;
   }
 
   async function softDelete(id: string) {
     ensureNotStub();
     await ensureCanAccess(id);
-    const delegate = delegateFor(prismaModel);
-    const before = await delegate.findUnique({ where: { id } });
-    const after = await delegate.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    const a = await actor();
+    if (!a) throw new Error("Não autenticado.");
+
+    const result = await prisma.$transaction(async (tx) => {
+      const delegate = delegateFor(prismaModel, tx);
+      const before = await delegate.findUnique({ where: { id } });
+      const after = await delegate.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await auditInTx(tx, a.id, "soft_delete", id, before, after);
+      return { before, after };
     });
-    await audit("soft_delete", id, before, after);
     bustCache();
-    return after;
+    await fireHook(a, "soft_delete", id, result.before, result.after);
+    return result.after;
   }
 
   async function restore(id: string) {
     ensureNotStub();
     await ensureCanAccess(id);
-    const delegate = delegateFor(prismaModel);
-    const before = await delegate.findUnique({ where: { id } });
-    const after = await delegate.update({
-      where: { id },
-      data: { deletedAt: null },
+    const a = await actor();
+    if (!a) throw new Error("Não autenticado.");
+
+    const result = await prisma.$transaction(async (tx) => {
+      const delegate = delegateFor(prismaModel, tx);
+      const before = await delegate.findUnique({ where: { id } });
+      const after = await delegate.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      await auditInTx(tx, a.id, "restore", id, before, after);
+      return { before, after };
     });
-    await audit("restore", id, before, after);
     bustCache();
-    return after;
+    await fireHook(a, "restore", id, result.before, result.after);
+    return result.after;
   }
 
   async function bulkDelete(ids: string[]) {

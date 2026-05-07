@@ -67,46 +67,48 @@ export async function updateDias(
     throw new Error(`Geração ${geracaoId} não encontrada ou arquivada.`);
   }
 
-  // Snapshot dos dias antes da edição pra audit before/after.
-  const beforeDias = await prisma.geracaoDia.findMany({
-    where: { geracaoId },
-    select: { dia: true, kwh: true },
-    orderBy: { dia: "asc" },
-  });
+  // Mutações + audit numa única transação — falha em qualquer ponto reverte
+  // tudo (nenhuma linha de GeracaoDia muda sem audit correspondente).
+  const count = await prisma.$transaction(async (tx) => {
+    const beforeDias = await tx.geracaoDia.findMany({
+      where: { geracaoId },
+      select: { dia: true, kwh: true },
+      orderBy: { dia: "asc" },
+    });
 
-  // Upsert por (geracaoId, dia). Se kwh é null, remove o registro pra manter
-  // a tabela limpa (em vez de armazenar NULL) — o Prisma não permite delete
-  // condicional no upsert, então rodamos por linha.
-  let count = 0;
-  for (const d of parsed) {
-    if (d.kwh == null) {
-      await prisma.geracaoDia.deleteMany({
-        where: { geracaoId, dia: d.dia },
-      });
-    } else {
-      await prisma.geracaoDia.upsert({
-        where: { geracaoId_dia: { geracaoId, dia: d.dia } },
-        create: { geracaoId, dia: d.dia, kwh: d.kwh },
-        update: { kwh: d.kwh },
-      });
+    let n = 0;
+    for (const d of parsed) {
+      if (d.kwh == null) {
+        await tx.geracaoDia.deleteMany({
+          where: { geracaoId, dia: d.dia },
+        });
+      } else {
+        await tx.geracaoDia.upsert({
+          where: { geracaoId_dia: { geracaoId, dia: d.dia } },
+          create: { geracaoId, dia: d.dia, kwh: d.kwh },
+          update: { kwh: d.kwh },
+        });
+      }
+      n++;
     }
-    count++;
-  }
 
-  // Audit do update de dias. Audit é "update" da Geracao (entidade pai) com
-  // before/after dos dias modificados.
-  const afterDias = await prisma.geracaoDia.findMany({
-    where: { geracaoId },
-    select: { dia: true, kwh: true },
-    orderBy: { dia: "asc" },
-  });
-  await recordAudit({
-    actor: { id: session.user.id },
-    entityType: "Geracao",
-    entityId: geracaoId,
-    action: "update",
-    before: { dias: beforeDias },
-    after: { dias: afterDias },
+    const afterDias = await tx.geracaoDia.findMany({
+      where: { geracaoId },
+      select: { dia: true, kwh: true },
+      orderBy: { dia: "asc" },
+    });
+    await recordAudit(
+      {
+        actor: { id: session.user.id },
+        entityType: "Geracao",
+        entityId: geracaoId,
+        action: "update",
+        before: { dias: beforeDias },
+        after: { dias: afterDias },
+      },
+      tx,
+    );
+    return n;
   });
 
   revalidatePath("/geracao");
