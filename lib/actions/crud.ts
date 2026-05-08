@@ -28,6 +28,9 @@
  * e `getActor` opcionais — estubados por enquanto.
  */
 import { revalidatePath } from "next/cache";
+
+import { Prisma } from "@prisma/client";
+import { serializePrisma } from "@/lib/serialize";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
@@ -219,7 +222,7 @@ export function createCrudActions<S extends z.ZodObject>(
     });
     bustCache();
     await fireHook(a, "create", created.id, null, created);
-    return created;
+    return serializePrisma(created);
   }
 
   async function update(id: string, input: unknown) {
@@ -238,7 +241,7 @@ export function createCrudActions<S extends z.ZodObject>(
     });
     bustCache();
     await fireHook(a, "update", id, result.before, result.after);
-    return result.after;
+    return serializePrisma(result.after);
   }
 
   async function softDelete(id: string) {
@@ -259,7 +262,7 @@ export function createCrudActions<S extends z.ZodObject>(
     });
     bustCache();
     await fireHook(a, "soft_delete", id, result.before, result.after);
-    return result.after;
+    return serializePrisma(result.after);
   }
 
   async function restore(id: string) {
@@ -280,7 +283,7 @@ export function createCrudActions<S extends z.ZodObject>(
     });
     bustCache();
     await fireHook(a, "restore", id, result.before, result.after);
-    return result.after;
+    return serializePrisma(result.after);
   }
 
   async function bulkDelete(ids: string[]) {
@@ -306,12 +309,95 @@ export function createCrudActions<S extends z.ZodObject>(
       ids === "all"
         ? where
         : { ...((where as Record<string, unknown>) ?? {}), id: { in: ids } };
-    const rows = (await delegate.findMany({ where: filter })) as Record<
-      string,
-      unknown
-    >[];
-    return exportRows(rows, format, prismaModel.toLowerCase());
+
+    // Inclui relações 1-1/N-1 com seus escalares — exports antes deixavam
+    // todos os campos vinculados (filial, fornecedor, usina) de fora, e o
+    // próprio Decimal dos valores virava célula opaca no XLSX.
+    const include = buildScalarInclude(prismaModel);
+    const rows = (await delegate.findMany({
+      where: filter,
+      ...(include ? { include } : {}),
+    })) as Record<string, unknown>[];
+
+    // Decimal → number; Date mantém. XLSX/CSV/JSON aceitam ambos.
+    const serialized = serializePrisma(rows) as Record<string, unknown>[];
+    // Achata relações como `filial_codigo`, `fornecedor_nome` etc.
+    const flat = flattenRelations(serialized);
+
+    return exportRows(flat, format, prismaModel.toLowerCase());
   }
 
   return { create, update, softDelete, restore, bulkDelete, bulkExport };
+}
+
+// ---------------------------------------------------------------------------
+// Export helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Constrói um `include` Prisma com todas as relações 1-1/N-1 (não-list) do
+ * model — apenas escalares de cada relação, evitando recursão profunda.
+ * Lista (1-N/N-N) é deixada de fora pra não inflar o export.
+ */
+function buildScalarInclude(
+  modelName: string,
+): Record<string, { select: Record<string, true> }> | undefined {
+  const model = Prisma.dmmf.datamodel.models.find((m) => m.name === modelName);
+  if (!model) return undefined;
+  const include: Record<string, { select: Record<string, true> }> = {};
+  for (const f of model.fields) {
+    if (f.kind !== "object" || f.isList) continue;
+    const target = Prisma.dmmf.datamodel.models.find(
+      (m) => m.name === f.type,
+    );
+    if (!target) continue;
+    const select: Record<string, true> = {};
+    for (const sf of target.fields) {
+      if (sf.kind === "scalar" || sf.kind === "enum") select[sf.name] = true;
+    }
+    if (Object.keys(select).length > 0) include[f.name] = { select };
+  }
+  return Object.keys(include).length > 0 ? include : undefined;
+}
+
+/**
+ * Achata relações nesteadas em colunas planas (`filial_codigo`, ...) — XLSX
+ * `json_to_sheet` não sabe lidar com objetos aninhados, escreveria
+ * "[object Object]" na célula. Aplicado APÓS `serializePrisma`, então não
+ * encontra Decimal/BigInt aqui.
+ */
+function flattenRelations(
+  rows: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  return rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(r)) {
+      if (
+        v &&
+        typeof v === "object" &&
+        !Array.isArray(v) &&
+        !(v instanceof Date)
+      ) {
+        for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
+          // Não desce além de um nível — evita explosão e ciclos.
+          if (
+            v2 &&
+            typeof v2 === "object" &&
+            !Array.isArray(v2) &&
+            !(v2 instanceof Date)
+          ) {
+            continue;
+          }
+          if (Array.isArray(v2)) continue;
+          out[`${k}_${k2}`] = v2;
+        }
+      } else if (Array.isArray(v)) {
+        // Listas viram contagem — evita XLSX vazio.
+        out[`${k}_count`] = v.length;
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  });
 }

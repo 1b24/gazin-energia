@@ -23,6 +23,8 @@ import {
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
+  type FilterFn,
+  type Row,
   type RowSelectionState,
   type SortingState,
   type VisibilityState,
@@ -57,6 +59,49 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+
+/**
+ * Global filter que inspeciona o `row.original` recursivamente — necessário
+ * porque várias colunas usam apenas `id` + `cell` (sem `accessorKey`), e o
+ * filtro padrão do tanstack só lê valores via accessor. Sem isto, buscar
+ * "GR ENERGY" não acha registros cujo nome vem de `fornecedor.nome`.
+ */
+function flattenForSearch(value: unknown, out: string[], depth = 0): void {
+  if (value == null || depth > 4) return;
+  if (typeof value === "string") {
+    out.push(value);
+    return;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    out.push(String(value));
+    return;
+  }
+  if (value instanceof Date) {
+    out.push(value.toISOString());
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) flattenForSearch(v, out, depth + 1);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      flattenForSearch(v, out, depth + 1);
+    }
+  }
+}
+
+const deepIncludesFilter: FilterFn<unknown> = (
+  row: Row<unknown>,
+  _columnId,
+  rawFilter,
+) => {
+  const term = String(rawFilter ?? "").trim().toLowerCase();
+  if (!term) return true;
+  const parts: string[] = [];
+  flattenForSearch(row.original, parts);
+  return parts.join(" ").toLowerCase().includes(term);
+};
 
 interface DataTableProps<T> {
   data: T[];
@@ -150,6 +195,7 @@ export function DataTable<T extends { id?: string }>({
     data,
     columns: allColumns,
     state: { sorting, globalFilter, columnVisibility, rowSelection },
+    globalFilterFn: deepIncludesFilter as FilterFn<T>,
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnVisibilityChange: setColumnVisibility,

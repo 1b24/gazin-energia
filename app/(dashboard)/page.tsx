@@ -7,16 +7,17 @@
  */
 import {
   AlertTriangle,
-  FileText,
   Gauge,
   MapPin,
   Plug,
   Sun,
   TrendingUp,
   Wrench,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 
+import { ConcessionariaFilter } from "@/components/dashboard/concessionaria-filter";
 import { FilialFilter } from "@/components/dashboard/filial-filter";
 import { GeracaoChart } from "@/components/dashboard/geracao-chart";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -29,8 +30,10 @@ import { auth } from "@/lib/auth";
 import {
   getAlerts,
   getAtencao,
+  getConcessionariaOptions,
   getFilialOptions,
   getGeracaoSerie,
+  getInjecaoPorConcessionaria,
   getKpis,
   getOrcadoVsRealizado,
   getUfOptions,
@@ -57,6 +60,7 @@ export default async function DashboardHomePage({
     ano?: string;
     mes?: string;
     uf?: string;
+    conc?: string;
   }>;
 }) {
   const session = await auth();
@@ -68,6 +72,7 @@ export default async function DashboardHomePage({
       ? sp.filial?.trim() || undefined
       : undefined;
   const ufFilter = sp.uf?.trim() || undefined;
+  const concessionariaFilter = sp.conc?.trim() || undefined;
 
   const period = periodFromQuery({ ano: sp.ano, mes: sp.mes });
 
@@ -78,9 +83,11 @@ export default async function DashboardHomePage({
     atencaoRaw,
     orcadoRealizadoRaw,
     ufsRaw,
+    concessionariasRaw,
     filialOptions,
     yearOptions,
     ufOptions,
+    concessionariaOptions,
   ] = await Promise.all([
     getKpis(filialFilter, period, ufFilter),
     getAlerts(filialFilter, ufFilter),
@@ -88,9 +95,16 @@ export default async function DashboardHomePage({
     getAtencao(filialFilter, period, ufFilter),
     getOrcadoVsRealizado(filialFilter, ufFilter),
     getUsinasPorUF(filialFilter, ufFilter),
+    getInjecaoPorConcessionaria(
+      filialFilter,
+      period,
+      ufFilter,
+      concessionariaFilter,
+    ),
     getFilialOptions(),
     getYearOptions(filialFilter),
     getUfOptions(filialFilter),
+    getConcessionariaOptions(filialFilter),
   ]);
 
   const serie = serializePrisma(serieRaw) as typeof serieRaw;
@@ -99,6 +113,9 @@ export default async function DashboardHomePage({
   ) as typeof orcadoRealizadoRaw;
   const atencao = serializePrisma(atencaoRaw) as typeof atencaoRaw;
   const ufs = serializePrisma(ufsRaw) as typeof ufsRaw;
+  const concessionarias = serializePrisma(
+    concessionariasRaw,
+  ) as typeof concessionariasRaw;
 
   const variant: "success" | "warning" | "destructive" | "default" =
     kpis.geracaoPctAtingido == null
@@ -125,6 +142,7 @@ export default async function DashboardHomePage({
             yearOptions={yearOptions}
           />
           <UfFilter options={ufOptions} />
+          <ConcessionariaFilter options={concessionariaOptions} />
           {session.user.role === "admin" && filialOptions.length > 0 && (
             <FilialFilter options={filialOptions} />
           )}
@@ -153,7 +171,12 @@ export default async function DashboardHomePage({
         <KpiCard
           label="Consumo total"
           value={`${fmtKwh(kpis.consumoTotalKwh)} kWh`}
-          subtitle={`No mês de ${period.mesPt}`}
+          subtitle={
+            <span>
+              P: <strong>{fmtKwh(kpis.consumoPontaKwh)}</strong> · FP:{" "}
+              <strong>{fmtKwh(kpis.consumoForaPontaKwh)}</strong> kWh
+            </span>
+          }
           icon={<Plug className="h-4 w-4" />}
         />
         <KpiCard
@@ -164,15 +187,80 @@ export default async function DashboardHomePage({
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <AlertCard
-          title="Licenças vencendo"
-          icon={<FileText className="h-4 w-4" />}
-          count={alerts.licencasVencendo}
-          href="/juridico/licencas"
-          empty="Nenhuma — módulo Licenças aguarda JSON."
-          subtitle="≤ 30 dias (proxy: total ativas)"
-        />
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Zap className="h-4 w-4" /> Injeção por Concessionária
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Mês de {period.mesPt}/{period.ano} — kWh injetado e consumo da
+            filial atendida, agrupados por concessionária
+            {concessionariaFilter ? ` (filtro: ${concessionariaFilter})` : ""}.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {concessionarias.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">
+              Sem injeções registradas no período.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">Concessionária</th>
+                    <th className="px-3 py-1.5 text-right">UCs</th>
+                    <th className="px-3 py-1.5 text-right">Injetado (kWh)</th>
+                    <th className="px-3 py-1.5 text-right">Consumo (kWh)</th>
+                    <th className="px-3 py-1.5 text-right">% Inj/Cons</th>
+                    <th className="px-3 py-1.5 text-right">Valor (R$)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {concessionarias.map((c) => {
+                    const pct =
+                      c.consumoKwh > 0
+                        ? (c.injetadoKwh / c.consumoKwh) * 100
+                        : null;
+                    return (
+                      <tr key={c.nome} className="border-t">
+                        <td className="px-3 py-1.5 font-medium">{c.nome}</td>
+                        <td className="px-3 py-1.5 text-right text-muted-foreground">
+                          {c.ucs}
+                        </td>
+                        <td className="px-3 py-1.5 text-right">
+                          {fmtKwh(c.injetadoKwh)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-muted-foreground">
+                          {fmtKwh(c.consumoKwh)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right">
+                          <Badge
+                            variant={
+                              pct == null
+                                ? "secondary"
+                                : pct >= 60
+                                  ? "default"
+                                  : "destructive"
+                            }
+                          >
+                            {fmtPct(pct)}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-1.5 text-right">
+                          {fmtBRL(c.valorReais)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <AlertCard
           title="Manutenções abertas"
           icon={<Wrench className="h-4 w-4" />}

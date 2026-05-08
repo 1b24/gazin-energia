@@ -6,6 +6,10 @@ import { Paperclip } from "lucide-react";
 
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
+import {
+  VariacaoCell,
+  variacaoSortingFn,
+} from "@/components/data-table/variacao-cell";
 import { Badge } from "@/components/ui/badge";
 import { buildConsumoFormFields, consumoSchema } from "@/lib/schemas/consumo";
 import type { FilialOption } from "@/lib/schemas/usina";
@@ -15,6 +19,11 @@ import * as actions from "./actions";
 
 export type ConsumoRow = Serialized<Consumo> & {
   filial: Pick<Filial, "id" | "codigo" | "mercadoLivre"> | null;
+  /** Δ vs mesmo UC no mês anterior — calculado no server. */
+  variacaoConsumoAbs?: number | null;
+  variacaoConsumoPct?: number | null;
+  variacaoFaturaAbs?: number | null;
+  variacaoFaturaPct?: number | null;
 };
 
 const fmtKwh = (n: number | null | undefined) =>
@@ -119,6 +128,19 @@ const columns: ColumnDef<ConsumoRow, unknown>[] = [
     cell: ({ row }) => fmtKwh(row.original.consumoTotal),
   },
   {
+    accessorKey: "variacaoConsumoPct",
+    header: "Δ Consumo",
+    sortingFn: variacaoSortingFn,
+    sortDescFirst: true,
+    cell: ({ row }) => (
+      <VariacaoCell
+        pct={row.original.variacaoConsumoPct ?? null}
+        abs={row.original.variacaoConsumoAbs ?? null}
+        unidade="kWh"
+      />
+    ),
+  },
+  {
     accessorKey: "injecaoRecebida",
     header: "Injeção (kWh)",
     cell: ({ row }) => fmtKwh(row.original.injecaoRecebida),
@@ -149,6 +171,19 @@ const columns: ColumnDef<ConsumoRow, unknown>[] = [
     header: "Total fatura",
     cell: ({ row }) => (
       <span className="font-medium">{fmtBRL(row.original.valorTotalFatura)}</span>
+    ),
+  },
+  {
+    accessorKey: "variacaoFaturaPct",
+    header: "Δ Fatura",
+    sortingFn: variacaoSortingFn,
+    sortDescFirst: true,
+    cell: ({ row }) => (
+      <VariacaoCell
+        pct={row.original.variacaoFaturaPct ?? null}
+        abs={row.original.variacaoFaturaAbs ?? null}
+        unidade="R$"
+      />
     ),
   },
   // --- Multas ---
