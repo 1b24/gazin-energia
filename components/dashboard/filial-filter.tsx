@@ -34,7 +34,9 @@ export function FilialFilter({ options }: { options: Option[] }) {
         const sp = new URLSearchParams(params);
         if (v) sp.set("filial", v);
         else sp.delete("filial");
-        router.push(`/?${sp.toString()}`);
+        const qs = sp.toString();
+        router.push(qs ? `/?${qs}` : "/");
+        router.refresh();
       }}
     >
       <SelectTrigger className="h-8 w-64 text-xs">

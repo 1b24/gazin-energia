@@ -51,9 +51,13 @@ export function PeriodFilter({
 
   function update(next: { ano?: number; mes?: number }) {
     const sp = new URLSearchParams(params);
-    if (next.ano != null) sp.set("ano", String(next.ano));
-    if (next.mes != null) sp.set("mes", String(next.mes));
+    // periodFromQuery exige ano E mes válidos juntos — então sempre setamos
+    // os dois usando o período vigente como fallback. Sem isso, uma URL
+    // tipo `/?mes=3` (sem ano) era ignorada e voltava pro mês corrente.
+    sp.set("ano", String(next.ano ?? ano));
+    sp.set("mes", String(next.mes ?? mes));
     router.push(`/?${sp.toString()}`);
+    router.refresh();
   }
 
   function reset() {
