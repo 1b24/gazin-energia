@@ -91,6 +91,36 @@ async function getDb(filialFilter?: string) {
   return { db, session, filialFilter };
 }
 
+/**
+ * Helper: monta a parte do `where` que aplica filtros de Filial e UF de
+ * acordo com a ligação da entidade ao mundo real.
+ *  - 'self'   → entidade tem `filialId` E `uf` próprios (Filial, Usina).
+ *  - 'usina'  → entidade liga via `usina.filialId / usina.uf` (Geracao,
+ *               VendaKwh, Orcamento, CronogramaLimpeza, ManutencaoPreventiva).
+ *  - 'filial' → entidade liga via `filial.filialId / filial.uf` (Consumo,
+ *               Injecao, Fornecedor com abrangencia).
+ */
+function scopeWhere(
+  via: "self" | "usina" | "filial",
+  filialFilter?: string,
+  ufFilter?: string,
+): Record<string, unknown> {
+  const where: Record<string, unknown> = {};
+  if (via === "self") {
+    if (filialFilter) where.filialId = filialFilter;
+    if (ufFilter) where.uf = ufFilter;
+  } else if (via === "usina") {
+    const usina: Record<string, unknown> = {};
+    if (filialFilter) usina.filialId = filialFilter;
+    if (ufFilter) usina.uf = ufFilter;
+    if (Object.keys(usina).length) where.usina = usina;
+  } else if (via === "filial") {
+    if (filialFilter) where.filialId = filialFilter;
+    if (ufFilter) where.filial = { uf: ufFilter };
+  }
+  return where;
+}
+
 // ----------------------------------------------------------------------------
 // KPIs
 // ----------------------------------------------------------------------------
@@ -120,6 +150,7 @@ function decimalToNumber(v: { toNumber(): number } | number | null | undefined):
 export async function getKpis(
   filialFilter?: string,
   period?: CurrentPeriod,
+  ufFilter?: string,
 ): Promise<DashboardKpis> {
   const { db } = await getDb(filialFilter);
   const p = period ?? getCurrentPeriod();
@@ -130,7 +161,7 @@ export async function getKpis(
       ano: p.ano,
       mes: p.mesPt,
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
     select: {
       metaMensal: true,
@@ -154,7 +185,7 @@ export async function getKpis(
       ano: p.ano,
       mes: p.mesNum,
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
     select: { valorReais: true },
   });
@@ -169,7 +200,7 @@ export async function getKpis(
       ano: p.ano,
       mes: p.mesPt,
       deletedAt: null,
-      ...(filialFilter ? { filialId: filialFilter } : {}),
+      ...scopeWhere("filial", filialFilter, ufFilter),
     },
     select: { consumoTotal: true },
   });
@@ -183,7 +214,7 @@ export async function getKpis(
     where: {
       status: "operacional",
       deletedAt: null,
-      ...(filialFilter ? { filialId: filialFilter } : {}),
+      ...scopeWhere("self", filialFilter, ufFilter),
     },
   });
 
@@ -216,43 +247,44 @@ export interface DashboardAlerts {
   processosAtencao: number;
 }
 
-export async function getAlerts(filialFilter?: string): Promise<DashboardAlerts> {
+export async function getAlerts(
+  filialFilter?: string,
+  ufFilter?: string,
+): Promise<DashboardAlerts> {
   const { db } = await getDb(filialFilter);
 
   // Licenças (stub) — count atual será 0 até JSON chegar.
   const licencasVencendo = await db.licenca.count({
     where: {
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
   });
 
   const corretivas = await db.manutencaoCorretiva.count({
     where: {
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
   });
   const preventivasAbertas = await db.manutencaoPreventiva.count({
     where: {
       status: { in: ["pendente", "em_andamento"] },
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
   });
   const manutencoesAbertas = corretivas + preventivasAbertas;
 
-  // Processos: ProcessoJuridico não tem FK de filial — count global ou
-  // skip pra não-admin? Sem filial-link, mostramos só para admin (sem
-  // filialFilter). Pra gestor_filial mostramos 0 (já que não há vínculo).
-  const processosAtencao = filialFilter
-    ? 0
-    : await db.processoJuridico.count({
-        where: {
-          tipo: "judicial",
-          deletedAt: null,
-        },
-      });
+  // Processos: ProcessoJuridico não tem FK de filial nem UF — só agrega
+  // quando não há filtro de escopo. Para qualquer filtro (filial ou UF),
+  // mostramos 0 já que não há vínculo formal.
+  const processosAtencao =
+    filialFilter || ufFilter
+      ? 0
+      : await db.processoJuridico.count({
+          where: { tipo: "judicial", deletedAt: null },
+        });
 
   return { licencasVencendo, manutencoesAbertas, processosAtencao };
 }
@@ -273,17 +305,17 @@ export interface GeracaoSeriePoint {
 export async function getGeracaoSerie(
   filialFilter?: string,
   period?: CurrentPeriod,
+  ufFilter?: string,
 ): Promise<GeracaoSeriePoint[]> {
   const { db } = await getDb(filialFilter);
   const window = last12MonthsEndingAt(period);
 
-  // Coleta as geracoes que caem na janela (geracao.ano = qualquer da janela).
   const anos = Array.from(new Set(window.map((w) => w.ano)));
   const geracoes = await db.geracao.findMany({
     where: {
       ano: { in: anos },
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
     select: {
       ano: true,
@@ -332,6 +364,7 @@ export interface AtencaoRow {
 export async function getAtencao(
   filialFilter?: string,
   period?: CurrentPeriod,
+  ufFilter?: string,
 ): Promise<AtencaoRow[]> {
   const { db } = await getDb(filialFilter);
   const p = period ?? getCurrentPeriod();
@@ -342,7 +375,7 @@ export async function getAtencao(
       mes: p.mesPt,
       deletedAt: null,
       metaMensal: { not: null, gt: 0 },
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
     select: {
       usinaId: true,
@@ -383,13 +416,13 @@ export interface OrcadoRealizadoPoint {
 
 export async function getOrcadoVsRealizado(
   filialFilter?: string,
+  ufFilter?: string,
 ): Promise<OrcadoRealizadoPoint[]> {
   const { db } = await getDb(filialFilter);
-  // Source só tem 2026; agrega tudo no ano.
   const orcamentos = await db.orcamento.findMany({
     where: {
       deletedAt: null,
-      ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      ...scopeWhere("usina", filialFilter, ufFilter),
     },
     select: {
       mes: true,
@@ -435,12 +468,13 @@ export interface UfBucket {
 
 export async function getUsinasPorUF(
   filialFilter?: string,
+  ufFilter?: string,
 ): Promise<UfBucket[]> {
   const { db } = await getDb(filialFilter);
   const usinas = await db.usina.findMany({
     where: {
       deletedAt: null,
-      uf: { not: null },
+      uf: ufFilter ? (ufFilter as never) : { not: null },
       ...(filialFilter ? { filialId: filialFilter } : {}),
     },
     select: { uf: true, status: true },
@@ -477,6 +511,38 @@ export async function getUsinasPorUF(
 export interface FilialOption {
   id: string;
   label: string;
+}
+
+/**
+ * UFs distintas com dados (Usina ou Filial) no escopo do usuário —
+ * alimenta o dropdown de UF.
+ */
+export async function getUfOptions(filialFilter?: string): Promise<string[]> {
+  const { db } = await getDb(filialFilter);
+  const [u, f] = await Promise.all([
+    db.usina.findMany({
+      where: {
+        deletedAt: null,
+        uf: { not: null },
+        ...(filialFilter ? { filialId: filialFilter } : {}),
+      },
+      select: { uf: true },
+      distinct: ["uf"],
+    }),
+    db.filial.findMany({
+      where: {
+        deletedAt: null,
+        uf: { not: null },
+        ...(filialFilter ? { id: filialFilter } : {}),
+      },
+      select: { uf: true },
+      distinct: ["uf"],
+    }),
+  ]);
+  const set = new Set<string>();
+  for (const r of u) if (r.uf) set.add(r.uf);
+  for (const r of f) if (r.uf) set.add(r.uf);
+  return Array.from(set).sort();
 }
 
 /**

@@ -22,6 +22,7 @@ import { GeracaoChart } from "@/components/dashboard/geracao-chart";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { OrcadoRealizadoChart } from "@/components/dashboard/orcado-realizado-chart";
 import { PeriodFilter } from "@/components/dashboard/period-filter";
+import { UfFilter } from "@/components/dashboard/uf-filter";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth } from "@/lib/auth";
@@ -32,6 +33,7 @@ import {
   getGeracaoSerie,
   getKpis,
   getOrcadoVsRealizado,
+  getUfOptions,
   getUsinasPorUF,
   getYearOptions,
   periodFromQuery,
@@ -50,7 +52,12 @@ const fmtPct = (n: number | null) =>
 export default async function DashboardHomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ filial?: string; ano?: string; mes?: string }>;
+  searchParams: Promise<{
+    filial?: string;
+    ano?: string;
+    mes?: string;
+    uf?: string;
+  }>;
 }) {
   const session = await auth();
   if (!session?.user) return null;
@@ -60,6 +67,7 @@ export default async function DashboardHomePage({
     session.user.role === "admin"
       ? sp.filial?.trim() || undefined
       : undefined;
+  const ufFilter = sp.uf?.trim() || undefined;
 
   const period = periodFromQuery({ ano: sp.ano, mes: sp.mes });
 
@@ -72,15 +80,17 @@ export default async function DashboardHomePage({
     ufsRaw,
     filialOptions,
     yearOptions,
+    ufOptions,
   ] = await Promise.all([
-    getKpis(filialFilter, period),
-    getAlerts(filialFilter),
-    getGeracaoSerie(filialFilter, period),
-    getAtencao(filialFilter, period),
-    getOrcadoVsRealizado(filialFilter),
-    getUsinasPorUF(filialFilter),
+    getKpis(filialFilter, period, ufFilter),
+    getAlerts(filialFilter, ufFilter),
+    getGeracaoSerie(filialFilter, period, ufFilter),
+    getAtencao(filialFilter, period, ufFilter),
+    getOrcadoVsRealizado(filialFilter, ufFilter),
+    getUsinasPorUF(filialFilter, ufFilter),
     getFilialOptions(),
     getYearOptions(filialFilter),
+    getUfOptions(filialFilter),
   ]);
 
   const serie = serializePrisma(serieRaw) as typeof serieRaw;
@@ -114,6 +124,7 @@ export default async function DashboardHomePage({
             mes={period.mesIdx + 1}
             yearOptions={yearOptions}
           />
+          <UfFilter options={ufOptions} />
           {session.user.role === "admin" && filialOptions.length > 0 && (
             <FilialFilter options={filialOptions} />
           )}
