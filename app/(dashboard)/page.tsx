@@ -21,18 +21,20 @@ import { FilialFilter } from "@/components/dashboard/filial-filter";
 import { GeracaoChart } from "@/components/dashboard/geracao-chart";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { OrcadoRealizadoChart } from "@/components/dashboard/orcado-realizado-chart";
+import { PeriodFilter } from "@/components/dashboard/period-filter";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth } from "@/lib/auth";
 import {
   getAlerts,
   getAtencao,
-  getCurrentPeriod,
   getFilialOptions,
   getGeracaoSerie,
   getKpis,
   getOrcadoVsRealizado,
   getUsinasPorUF,
+  getYearOptions,
+  periodFromQuery,
 } from "@/lib/dashboard";
 import { serializePrisma } from "@/lib/serialize";
 
@@ -48,7 +50,7 @@ const fmtPct = (n: number | null) =>
 export default async function DashboardHomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ filial?: string }>;
+  searchParams: Promise<{ filial?: string; ano?: string; mes?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) return null;
@@ -59,7 +61,7 @@ export default async function DashboardHomePage({
       ? sp.filial?.trim() || undefined
       : undefined;
 
-  const period = getCurrentPeriod();
+  const period = periodFromQuery({ ano: sp.ano, mes: sp.mes });
 
   const [
     kpis,
@@ -69,14 +71,16 @@ export default async function DashboardHomePage({
     orcadoRealizadoRaw,
     ufsRaw,
     filialOptions,
+    yearOptions,
   ] = await Promise.all([
-    getKpis(filialFilter),
+    getKpis(filialFilter, period),
     getAlerts(filialFilter),
-    getGeracaoSerie(filialFilter),
-    getAtencao(filialFilter),
+    getGeracaoSerie(filialFilter, period),
+    getAtencao(filialFilter, period),
     getOrcadoVsRealizado(filialFilter),
     getUsinasPorUF(filialFilter),
     getFilialOptions(),
+    getYearOptions(filialFilter),
   ]);
 
   const serie = serializePrisma(serieRaw) as typeof serieRaw;
@@ -97,16 +101,23 @@ export default async function DashboardHomePage({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-xs text-muted-foreground">
-            Mês corrente: {period.mesPt}/{period.ano}
+            Período: {period.mesPt}/{period.ano}
           </p>
         </div>
-        {session.user.role === "admin" && filialOptions.length > 0 && (
-          <FilialFilter options={filialOptions} />
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <PeriodFilter
+            ano={period.ano}
+            mes={period.mesIdx + 1}
+            yearOptions={yearOptions}
+          />
+          {session.user.role === "admin" && filialOptions.length > 0 && (
+            <FilialFilter options={filialOptions} />
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">

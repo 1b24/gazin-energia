@@ -43,21 +43,43 @@ export interface CurrentPeriod {
 
 export function getCurrentPeriod(): CurrentPeriod {
   const d = new Date();
-  const mesIdx = d.getMonth();
+  return makePeriod(d.getFullYear(), d.getMonth());
+}
+
+/** Constrói um `CurrentPeriod` a partir de ano + mesIdx (0..11). */
+export function makePeriod(ano: number, mesIdx: number): CurrentPeriod {
+  const safeIdx = Math.max(0, Math.min(11, mesIdx));
   return {
-    ano: d.getFullYear(),
-    mesIdx,
-    mesPt: MESES_PT[mesIdx],
-    mesNum: String(mesIdx + 1).padStart(2, "0"),
+    ano,
+    mesIdx: safeIdx,
+    mesPt: MESES_PT[safeIdx],
+    mesNum: String(safeIdx + 1).padStart(2, "0"),
   };
 }
 
-/** Retorna a janela de últimos 12 meses (mais antigo → mais recente). */
-export function last12Months(): { ano: number; mesIdx: number }[] {
-  const now = new Date();
+/** Resolve ?ano=&mes= dos search params, com fallback pro mês corrente. */
+export function periodFromQuery(query: {
+  ano?: string;
+  mes?: string;
+}): CurrentPeriod {
+  const ano = Number(query.ano);
+  const mes = Number(query.mes);
+  if (!Number.isFinite(ano) || !Number.isFinite(mes) || ano < 2000 || mes < 1 || mes > 12) {
+    return getCurrentPeriod();
+  }
+  return makePeriod(ano, mes - 1);
+}
+
+/**
+ * Retorna a janela de 12 meses TERMINANDO no `period` informado (mais antigo
+ * → mais recente). Ex: period=2026-05 → jun/2025 ... mai/2026.
+ */
+export function last12MonthsEndingAt(
+  period: CurrentPeriod = getCurrentPeriod(),
+): { ano: number; mesIdx: number }[] {
   const out: { ano: number; mesIdx: number }[] = [];
   for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(period.ano, period.mesIdx - i, 1);
     out.push({ ano: d.getFullYear(), mesIdx: d.getMonth() });
   }
   return out;
@@ -95,9 +117,12 @@ function decimalToNumber(v: { toNumber(): number } | number | null | undefined):
   return typeof v === "number" ? v : v.toNumber();
 }
 
-export async function getKpis(filialFilter?: string): Promise<DashboardKpis> {
+export async function getKpis(
+  filialFilter?: string,
+  period?: CurrentPeriod,
+): Promise<DashboardKpis> {
   const { db } = await getDb(filialFilter);
-  const p = getCurrentPeriod();
+  const p = period ?? getCurrentPeriod();
 
   // Geração: filtra por mes pt-BR, agrega kWh dos dias, soma metas.
   const geracoes = await db.geracao.findMany({
@@ -247,9 +272,10 @@ export interface GeracaoSeriePoint {
 
 export async function getGeracaoSerie(
   filialFilter?: string,
+  period?: CurrentPeriod,
 ): Promise<GeracaoSeriePoint[]> {
   const { db } = await getDb(filialFilter);
-  const window = last12Months();
+  const window = last12MonthsEndingAt(period);
 
   // Coleta as geracoes que caem na janela (geracao.ano = qualquer da janela).
   const anos = Array.from(new Set(window.map((w) => w.ano)));
@@ -303,9 +329,12 @@ export interface AtencaoRow {
   pctAtingido: number;
 }
 
-export async function getAtencao(filialFilter?: string): Promise<AtencaoRow[]> {
+export async function getAtencao(
+  filialFilter?: string,
+  period?: CurrentPeriod,
+): Promise<AtencaoRow[]> {
   const { db } = await getDb(filialFilter);
-  const p = getCurrentPeriod();
+  const p = period ?? getCurrentPeriod();
 
   const geracoes = await db.geracao.findMany({
     where: {
@@ -448,6 +477,38 @@ export async function getUsinasPorUF(
 export interface FilialOption {
   id: string;
   label: string;
+}
+
+/**
+ * Anos com dados de Geração ou Consumo no escopo atual — alimenta o
+ * dropdown de período. Sempre inclui o ano corrente como fallback.
+ */
+export async function getYearOptions(filialFilter?: string): Promise<number[]> {
+  const { db } = await getDb(filialFilter);
+  const [g, c] = await Promise.all([
+    db.geracao.findMany({
+      where: {
+        ano: { not: null },
+        deletedAt: null,
+        ...(filialFilter ? { usina: { filialId: filialFilter } } : {}),
+      },
+      select: { ano: true },
+      distinct: ["ano"],
+    }),
+    db.consumo.findMany({
+      where: {
+        ano: { not: null },
+        deletedAt: null,
+        ...(filialFilter ? { filialId: filialFilter } : {}),
+      },
+      select: { ano: true },
+      distinct: ["ano"],
+    }),
+  ]);
+  const set = new Set<number>([new Date().getFullYear()]);
+  for (const r of g) if (r.ano != null) set.add(r.ano);
+  for (const r of c) if (r.ano != null) set.add(r.ano);
+  return Array.from(set).sort((a, b) => b - a);
 }
 
 export async function getFilialOptions(): Promise<FilialOption[]> {
