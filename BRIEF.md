@@ -381,6 +381,228 @@ Layout responsivo (grid 12 cols desktop, 1 col mobile).
 
 ---
 
+## Tarefa 8 — Visões analíticas por entidade
+
+Objetivo: adicionar uma camada analítica individual nas entidades com dados populados, sem substituir as tabelas operacionais. A tabela continua sendo a fonte de consulta, edição, exportação e auditoria; a visão analítica entra acima dela ou em área equivalente para responder rapidamente "onde devo olhar primeiro?".
+
+Referência aprovada:
+
+- `app/(dashboard)/injecao/injecao-table.tsx`
+- A tela de Controle de Injeção é referência visual e de densidade de informação, mas **não é template rígido**. Cada entidade deve responder perguntas próprias do domínio.
+
+### 8.0 Preparação técnica
+
+Antes de replicar o padrão:
+
+- Resolver pendências de worktree e commit.
+- Garantir que `graphify-out/` local esteja atualizado quando houver alteração estrutural relevante.
+- Extrair componentes reutilizáveis **apenas quando houver repetição real**. Não criar abstração genérica ampla antes de Consumo e Geração estarem implementados.
+
+Possíveis componentes reutilizáveis:
+
+- `MetricCard` para indicadores compactos.
+- Barra horizontal de ranking.
+- Card de qualidade dos dados.
+- Helpers de formatação (`kWh`, moeda, percentual, razões como R$/kWh).
+
+Critérios de pronto:
+
+- Controle de Injeção continua funcional e visualmente consistente.
+- Nenhuma mudança em RBAC, audit log, upload protegido, migrations, registry ou soft delete.
+- Nenhum dado é inventado para completar visual.
+
+### 8.1 Consumo analítico
+
+Prioridade: alta.
+
+Objetivo: criar visão analítica para Consumo, focada em consumo, fatura, ponta/fora ponta, variações e qualidade dos dados.
+
+Perguntas que a tela deve responder:
+
+- Quais UCs ou filiais mais consomem?
+- Quais têm maiores faturas?
+- Onde houve maior variação vs. mês anterior?
+- Quanto foi consumo de Ponta e Fora Ponta?
+- Quais registros têm dados faltantes, consumo zerado ou anexo ausente?
+
+Métricas:
+
+- Consumo total.
+- Consumo Ponta (`consumoKwhP`).
+- Consumo Fora Ponta (`consumoKwhFp`).
+- Valor total da fatura (`valorTotalFatura`).
+- Média por UC.
+- Top maiores consumos.
+- Top maiores faturas.
+- Maiores variações vs. mês anterior.
+- Registros sem anexo/fatura/dados essenciais.
+
+Critérios de pronto:
+
+- Usar `valorTotalFatura` como referência financeira principal.
+- Não tratar `valor`, `valor1`, `valor2`, `valor3` como preenchidos se a fonte estiver vazia.
+- Tabela operacional permanece funcional.
+- Ordenação e busca existentes não são quebradas.
+
+### 8.2 Geração analítica
+
+Prioridade: alta.
+
+Objetivo: criar visão analítica para Geração, focada em realizado, meta/orçamento quando disponível, desempenho por usina e sazonalidade.
+
+Perguntas que a tela deve responder:
+
+- Quais usinas mais geraram?
+- Quais usinas ficaram abaixo do esperado?
+- Como a geração evoluiu no período?
+- Onde há gap relevante entre realizado e meta/orçamento?
+
+Métricas:
+
+- Geração total.
+- Geração por usina.
+- Realizado vs. meta/orçamento, quando o cruzamento estiver confiável.
+- Top maiores gerações.
+- Usinas abaixo do esperado.
+- Evolução mensal.
+
+Critérios de pronto:
+
+- Respeitar escopo por filial/usuário.
+- Não fazer cruzamento com orçamento se a chave de relacionamento não for confiável.
+- Não alterar a lógica de edição diária existente em Geração.
+
+### 8.3 Orçamentário analítico
+
+Prioridade: média/alta.
+
+Objetivo: criar visão analítica do cadastro orçamentário, destacando distribuição por usina, período e tipo de orçamento.
+
+Perguntas que a tela deve responder:
+
+- Qual o total orçado?
+- Quais usinas concentram maior orçamento?
+- Como o orçamento se distribui por mês?
+- O que pode ser comparado com realizado sem inferência fraca?
+
+Métricas:
+
+- Total orçado.
+- Orçamento por usina.
+- Orçamento por mês.
+- Ranking por valor.
+- Qualidade dos dados e vínculos ausentes.
+
+Critérios de pronto:
+
+- Comparativo com realizado só entra quando houver chave clara e validada.
+- Não duplicar gráficos já existentes no Dashboard sem agregar leitura individual da entidade.
+
+### 8.4 Manutenção preventiva e limpeza
+
+Prioridade: média.
+
+Escopo inicial:
+
+- `CronogramaLimpeza`
+- `ManutencaoPreventiva`
+
+Objetivo: transformar tabelas de cronograma/status em leitura de pendências, atrasos, próximas execuções e concentração por usina/fornecedor.
+
+Perguntas que a tela deve responder:
+
+- O que está pendente?
+- O que está atrasado?
+- O que vence em breve?
+- Quais usinas concentram mais pendências?
+
+Métricas:
+
+- Total por status.
+- Pendentes.
+- Concluídas.
+- Atrasadas.
+- Próximas execuções.
+- Ranking por usina.
+
+Critérios de pronto:
+
+- Não criar conceito de atraso se não houver campo de data suficiente.
+- Manter links para os registros operacionais.
+
+### 8.5 Cadastros com visão de qualidade
+
+Prioridade: média/baixa.
+
+Escopo:
+
+- `Filial`
+- `Usina`
+- `Fornecedor`
+
+Objetivo: não criar dashboard financeiro para cadastro, e sim uma visão de qualidade cadastral.
+
+Perguntas que a tela deve responder:
+
+- Quais cadastros estão incompletos?
+- Como os registros se distribuem por UF/status?
+- Quais entidades estão sem vínculo essencial?
+- Há fornecedores sem CNPJ/escopo ou filiais sem UC?
+
+Métricas:
+
+- Total por status/UF.
+- Campos essenciais ausentes.
+- Vínculos ausentes.
+- Registros ativos/inativos.
+- Rankings de incompletude.
+
+Critérios de pronto:
+
+- Não poluir cadastro com gráficos irrelevantes.
+- Priorizar dados acionáveis para correção cadastral.
+
+### 8.6 Módulos pequenos ou opcionais
+
+Prioridade: baixa até haver mais dados ou uso real.
+
+Escopo atual:
+
+- `VendaKwh` (baixo volume).
+- `ProcessoJuridico` (baixo volume).
+- Entidades stub ou vazias permanecem sem visão analítica.
+
+Critérios para implementar:
+
+- A entidade tem dados suficientes para ranking, distribuição ou status.
+- A visão responde uma pergunta operacional clara.
+- Não duplica informação que a tabela já mostra melhor.
+
+### Regras específicas da Tarefa 8
+
+- Implementar uma entidade por vez.
+- Antes de alterar, verificar contagem real no banco e campos populados.
+- Usar Graphify apenas como mapa inicial; abrir sempre os arquivos reais antes de editar.
+- Não implementar visão analítica em entidade sem dados populados.
+- Não inventar métrica, status, campo calculado ou relação sem evidência no schema/dados.
+- Não criar nova rota quando a visão puder viver com segurança acima da tabela existente.
+- Não mexer em RBAC, audit log, uploads protegidos, migrations, registry, stubs ou soft delete.
+- Preferir cálculo no client quando os dados já estão carregados pela tabela e o volume é controlado.
+- Preferir agregação server-side quando houver risco de volume alto, cruzamento sensível ou custo de renderização.
+- Manter visual denso, operacional e escaneável; evitar hero, layout de marketing ou cards decorativos sem função.
+
+Validações obrigatórias por entidade:
+
+- `npx tsc --noEmit`
+- `npx eslint .`
+- `npm run check:rbac`
+- Smoke test da rota afetada.
+- Se houver nova rota, novo arquivo estrutural, alteração de imports/exports relevantes ou componente compartilhado novo, reindexar Graphify.
+
+**Pare e aguarde OK ao final de cada subtarefa.**
+
+---
+
 ## Regras de domínio CRÍTICAS
 
 1. **Potência da usina é `kW`, não `kWh`.** kWh é energia acumulada. O sistema antigo confunde. Renomeie:
@@ -431,6 +653,7 @@ Pare ao final de cada tarefa e aguarde meu OK:
 5. **Auth + RBAC** → OK
 6. **Audit log** → OK
 7. **Dashboard** → OK
+8. **Visões analíticas por entidade** (uma subtarefa por vez, começando por Consumo) → OK por subtarefa
 
 Em qualquer dúvida, ambiguidade ou decisão fora do que está aqui, **pergunte antes de assumir**. Prefiro pausar a refazer.
 
