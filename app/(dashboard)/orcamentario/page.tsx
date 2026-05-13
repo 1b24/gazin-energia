@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { OrcamentoTable, type OrcamentoRow } from "./orcamento-table";
@@ -9,15 +9,19 @@ export default async function OrcamentarioPage() {
   const db = scopedPrisma(session?.user);
 
   const [rows, usinaOptions] = await Promise.all([
-    db.orcamento.findMany({
-      include: { usina: { select: { id: true, nome: true } } },
-      orderBy: [{ mes: "asc" }, { usinaId: "asc" }],
-    }),
-    db.usina.findMany({
-      where: { deletedAt: null },
-      select: { id: true, nome: true },
-      orderBy: { nome: "asc" },
-    }),
+    retryClosedConnection(() =>
+      db.orcamento.findMany({
+        include: { usina: { select: { id: true, nome: true } } },
+        orderBy: [{ mes: "asc" }, { usinaId: "asc" }],
+      }),
+    ),
+    retryClosedConnection(() =>
+      db.usina.findMany({
+        where: { deletedAt: null },
+        select: { id: true, nome: true },
+        orderBy: { nome: "asc" },
+      }),
+    ),
   ]);
 
   return (

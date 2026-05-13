@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { PreventivaTable, type PreventivaRow } from "./preventiva-table";
@@ -9,15 +9,19 @@ export default async function PreventivaPage() {
   const db = scopedPrisma(session?.user);
 
   const [rows, usinaOptions] = await Promise.all([
-    db.manutencaoPreventiva.findMany({
-      include: { usina: { select: { id: true, nome: true } } },
-      orderBy: [{ status: "asc" }, { dataExecucao: "desc" }],
-    }),
-    db.usina.findMany({
-      where: { deletedAt: null },
-      select: { id: true, nome: true },
-      orderBy: { nome: "asc" },
-    }),
+    retryClosedConnection(() =>
+      db.manutencaoPreventiva.findMany({
+        include: { usina: { select: { id: true, nome: true } } },
+        orderBy: [{ status: "asc" }, { dataExecucao: "desc" }],
+      }),
+    ),
+    retryClosedConnection(() =>
+      db.usina.findMany({
+        where: { deletedAt: null },
+        select: { id: true, nome: true },
+        orderBy: { nome: "asc" },
+      }),
+    ),
   ]);
 
   return (

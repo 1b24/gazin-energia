@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { VendaKwhTable, type VendaKwhRow } from "./venda-kwh-table";
@@ -9,15 +9,19 @@ export default async function VendaKwhPage() {
   const db = scopedPrisma(session?.user);
 
   const [rows, usinaOptions] = await Promise.all([
-    db.vendaKwh.findMany({
-      include: { usina: { select: { id: true, nome: true } } },
-      orderBy: [{ ano: "desc" }, { mes: "desc" }],
-    }),
-    db.usina.findMany({
-      where: { deletedAt: null },
-      select: { id: true, nome: true },
-      orderBy: { nome: "asc" },
-    }),
+    retryClosedConnection(() =>
+      db.vendaKwh.findMany({
+        include: { usina: { select: { id: true, nome: true } } },
+        orderBy: [{ ano: "desc" }, { mes: "desc" }],
+      }),
+    ),
+    retryClosedConnection(() =>
+      db.usina.findMany({
+        where: { deletedAt: null },
+        select: { id: true, nome: true },
+        orderBy: { nome: "asc" },
+      }),
+    ),
   ]);
 
   return (

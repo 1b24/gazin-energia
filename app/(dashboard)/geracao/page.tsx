@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { GeracaoTable, type GeracaoRow } from "./geracao-table";
@@ -9,18 +9,22 @@ export default async function GeracaoPage() {
   const db = scopedPrisma(session?.user);
 
   const [rows, usinaOptions] = await Promise.all([
-    db.geracao.findMany({
-      include: {
-        usina: { select: { id: true, nome: true } },
-        dias: { orderBy: { dia: "asc" } },
-      },
-      orderBy: [{ ano: "desc" }, { usinaId: "asc" }],
-    }),
-    db.usina.findMany({
-      where: { deletedAt: null },
-      select: { id: true, nome: true },
-      orderBy: { nome: "asc" },
-    }),
+    retryClosedConnection(() =>
+      db.geracao.findMany({
+        include: {
+          usina: { select: { id: true, nome: true, uf: true } },
+          dias: { orderBy: { dia: "asc" } },
+        },
+        orderBy: [{ ano: "desc" }, { usinaId: "asc" }],
+      }),
+    ),
+    retryClosedConnection(() =>
+      db.usina.findMany({
+        where: { deletedAt: null },
+        select: { id: true, nome: true },
+        orderBy: { nome: "asc" },
+      }),
+    ),
   ]);
 
   return (

@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 
 import { FornecedoresTable, type FornecedorRow } from "./fornecedores-table";
@@ -9,19 +9,23 @@ export default async function FornecedoresPage() {
   const db = scopedPrisma(session?.user);
 
   const [rows, filialOptions] = await Promise.all([
-    db.fornecedor.findMany({
-      include: {
-        abrangenciaFilial: {
-          select: { id: true, codigo: true, mercadoLivre: true },
+    retryClosedConnection(() =>
+      db.fornecedor.findMany({
+        include: {
+          abrangenciaFilial: {
+            select: { id: true, codigo: true, mercadoLivre: true },
+          },
         },
-      },
-      orderBy: [{ status: "asc" }, { nome: "asc" }],
-    }),
-    db.filial.findMany({
-      where: { deletedAt: null },
-      select: { id: true, codigo: true, mercadoLivre: true },
-      orderBy: { codigo: "asc" },
-    }),
+        orderBy: [{ status: "asc" }, { nome: "asc" }],
+      }),
+    ),
+    retryClosedConnection(() =>
+      db.filial.findMany({
+        where: { deletedAt: null },
+        select: { id: true, codigo: true, mercadoLivre: true },
+        orderBy: { codigo: "asc" },
+      }),
+    ),
   ]);
 
   return (
