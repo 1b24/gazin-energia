@@ -11,7 +11,8 @@ export default async function PreventivaPage() {
   const [rows, usinaOptions] = await Promise.all([
     retryClosedConnection(() =>
       db.manutencaoPreventiva.findMany({
-        include: { usina: { select: { id: true, nome: true } } },
+        // `uf` da usina vem pra alimentar o filtro de UF no analytics.
+        include: { usina: { select: { id: true, nome: true, uf: true } } },
         orderBy: [{ status: "asc" }, { dataExecucao: "desc" }],
       }),
     ),
