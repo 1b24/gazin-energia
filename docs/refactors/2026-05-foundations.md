@@ -18,8 +18,8 @@ Não junte commits de steps diferentes.
 - [x] **Step 4** — A3: extrair `lib/period.ts` *(fechado em 12/05/2026; 58 testes passando, bug "MarÃ§o" no injecao-table corrigido de quebra)*
 - [x] **Step 5** — A2: extrair analytics helpers + centralizar formatters *(fechado em 12/05/2026; ~200 linhas duplicadas removidas, 69 testes passando, 3 bugs colaterais corrigidos)*
 - [x] **Step 6** — B2: hook `useAnalyticsFilters` e replicar multi-select em Injeção/Geração *(fechado em 12/05/2026; Geração e Injeção ganharam filtro de UF que não existia; Consumo migrou pro hook removendo ~55 linhas; 69 testes passando)*
-- [ ] **Step 7** — B3: autorização fina de `/api/files/...`
-- [ ] **Step 8** — B1: quebrar `lib/dashboard.ts` por feature
+- [x] **Step 7** — B3: autorização fina de `/api/files/...` *(fechado em 13/05/2026; cobre 6 modelos / 7 campos de arquivo; arquivo órfão nega por padrão)*
+- [x] **Step 8** — B1: quebrar `lib/dashboard.ts` por feature *(fechado em 13/05/2026; 1 arquivo de 770 linhas → 9 arquivos focados, maior com 177 linhas; API pública preservada via index.ts)*
 
 ---
 
