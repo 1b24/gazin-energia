@@ -125,6 +125,29 @@ export interface TarifaDistribuidoraSerialized {
   vigenciaFim: string | null;
 }
 
+/** Motivo pelo qual uma linha não entrou no cálculo de economia. */
+type SkipReason =
+  | "sem_uf"
+  | "sem_periodo"
+  | "sem_tarifa_uf"
+  | "vigencia_fora"
+  | "tarifa_vazia";
+
+interface SkippedComparison {
+  rowId: string;
+  label: string;
+  reason: SkipReason;
+  detail: string;
+}
+
+const SKIP_REASON_LABEL: Record<SkipReason, string> = {
+  sem_uf: "Sem UF na filial",
+  sem_periodo: "Período inválido",
+  sem_tarifa_uf: "Sem tarifa pra UF",
+  vigencia_fora: "Vigência não cobre data",
+  tarifa_vazia: "Tarifa sem valores",
+};
+
 function InjecaoAnalytics({
   rows,
   tarifasDistribuidoras,
@@ -176,21 +199,53 @@ function InjecaoAnalytics({
     );
 
     // Economia vs distribuidora — calcula linha por linha usando tarifa
-    // histórica que cobria a data do registro.
+    // histórica. Quando uma linha não pode ser comparada, é tracked com
+    // motivo específico pra mostrar transparência ao usuário (em vez de
+    // só somar num contador opaco).
     let economiaTotal = 0;
-    let rowsComTarifa = 0;
-    let rowsSemTarifa = 0;
+    const skipped: SkippedComparison[] = [];
     const economiaPorFornecedor = new Map<string, number>();
     for (const row of scopedRows) {
       const uf = row.filial?.uf?.trim() || null;
       const refDate = refDateFromAnoMes(row.ano, row.mes);
-      if (!uf || !refDate) {
-        rowsSemTarifa += 1;
+      const rowLabel = `${fornecedorLabel(row)} · ${filialLabel(row)} · ${row.mes ?? "?"}/${row.ano ?? "?"}`;
+
+      if (!uf) {
+        skipped.push({
+          rowId: row.id,
+          label: rowLabel,
+          reason: "sem_uf",
+          detail: "Filial sem UF cadastrada",
+        });
         continue;
       }
-      const tarifa = findTarifaPorData(tarifas, uf, refDate);
+      if (!refDate) {
+        skipped.push({
+          rowId: row.id,
+          label: rowLabel,
+          reason: "sem_periodo",
+          detail: "Ano ou mês inválido no registro",
+        });
+        continue;
+      }
+      const tarifasUF = tarifas.filter((t) => t.uf === uf);
+      if (tarifasUF.length === 0) {
+        skipped.push({
+          rowId: row.id,
+          label: rowLabel,
+          reason: "sem_tarifa_uf",
+          detail: `Nenhuma tarifa cadastrada para UF ${uf}`,
+        });
+        continue;
+      }
+      const tarifa = findTarifaPorData(tarifasUF, uf, refDate);
       if (!tarifa) {
-        rowsSemTarifa += 1;
+        skipped.push({
+          rowId: row.id,
+          label: rowLabel,
+          reason: "vigencia_fora",
+          detail: `Tarifa ${uf} cadastrada mas vigência não cobre ${row.mes}/${row.ano}`,
+        });
         continue;
       }
       const kwhPonta = row.consumoKwhP ?? 0;
@@ -198,18 +253,23 @@ function InjecaoAnalytics({
       const kwhForaPonta = Math.max(0, kwhTotal - kwhPonta);
       const valorDist = calcValorDistribuidora(kwhPonta, kwhForaPonta, tarifa);
       if (valorDist == null) {
-        rowsSemTarifa += 1;
+        skipped.push({
+          rowId: row.id,
+          label: rowLabel,
+          reason: "tarifa_vazia",
+          detail: "Tarifa sem valor Ponta nem Fora Ponta preenchido",
+        });
         continue;
       }
       const economia = valorDist - rowValor(row);
       economiaTotal += economia;
-      rowsComTarifa += 1;
       const fornecedorKey = fornecedorLabel(row);
       economiaPorFornecedor.set(
         fornecedorKey,
         (economiaPorFornecedor.get(fornecedorKey) ?? 0) + economia,
       );
     }
+    const rowsComTarifa = scopedRows.length - skipped.length;
 
     const fornecedores = new Map<
       string,
@@ -299,7 +359,7 @@ function InjecaoAnalytics({
       ucsCount: ucs.size,
       economiaTotal,
       rowsComTarifa,
-      rowsSemTarifa,
+      skipped,
       fornecedoresRank,
       periodosRank,
       topKwh,
@@ -379,22 +439,22 @@ function InjecaoAnalytics({
         <MetricCard
           title="Economia vs distribuidora"
           value={
-            data.rowsComTarifa === 0 ? (
-              <span className="text-muted-foreground">—</span>
-            ) : (
-              <span
-                className={
-                  data.economiaTotal >= 0 ? "text-emerald-600" : "text-destructive"
-                }
-              >
-                {fmtBRL(data.economiaTotal)}
-              </span>
-            )
+            <span
+              className={
+                data.rowsComTarifa === 0
+                  ? "text-muted-foreground"
+                  : data.economiaTotal >= 0
+                    ? "text-emerald-600"
+                    : "text-destructive"
+              }
+            >
+              {fmtBRL(data.economiaTotal)}
+            </span>
           }
           description={
-            data.rowsComTarifa === 0
-              ? "Cadastre tarifa de distribuidora em /tarifas pra comparar"
-              : `${data.rowsComTarifa} comparáveis · ${data.rowsSemTarifa} sem tarifa cobrindo a data`
+            data.skipped.length === 0
+              ? `${data.rowsComTarifa} registro(s) comparados`
+              : `${data.rowsComTarifa} comparados · ${data.skipped.length} sem comparação (ver abaixo)`
           }
           icon={<PiggyBank className="h-4 w-4" />}
         />
@@ -565,6 +625,62 @@ function InjecaoAnalytics({
           </CardContent>
         </Card>
       </div>
+
+      {data.skipped.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Registros sem comparação ({data.skipped.length})</CardTitle>
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Não entraram no cálculo de economia. Resumo por motivo abaixo,
+              seguido dos primeiros 20 detalhes.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Resumo por motivo */}
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(
+                data.skipped.reduce<Record<SkipReason, number>>(
+                  (acc, s) => {
+                    acc[s.reason] = (acc[s.reason] ?? 0) + 1;
+                    return acc;
+                  },
+                  {} as Record<SkipReason, number>,
+                ),
+              ).map(([reason, count]) => (
+                <Badge key={reason} variant="outline">
+                  {SKIP_REASON_LABEL[reason as SkipReason]}: {count}
+                </Badge>
+              ))}
+            </div>
+
+            {/* Detalhes */}
+            <div className="space-y-1.5 text-xs">
+              {data.skipped.slice(0, 20).map((s) => (
+                <div
+                  key={s.rowId}
+                  className="flex items-start justify-between gap-3 border-b border-dashed pb-1.5"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{s.label}</div>
+                    <div className="text-muted-foreground">{s.detail}</div>
+                  </div>
+                  <Badge variant="outline" className="shrink-0 text-[10px]">
+                    {SKIP_REASON_LABEL[s.reason]}
+                  </Badge>
+                </div>
+              ))}
+              {data.skipped.length > 20 && (
+                <p className="pt-2 text-muted-foreground">
+                  ... e mais {data.skipped.length - 20} registro(s).
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </section>
   );
 }
