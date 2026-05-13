@@ -8,7 +8,7 @@
  * `@hookform/resolvers/zod`. Suporta `create` e `edit` via prop `defaultValues`.
  */
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Paperclip, Upload, X } from "lucide-react";
+import { ExternalLink, Paperclip, Upload, X } from "lucide-react";
 import { useRef, useState, useTransition } from "react";
 import {
   Controller,
@@ -19,7 +19,7 @@ import {
 import type { z } from "zod";
 
 import { uploadFile } from "@/lib/actions/upload";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,8 +99,9 @@ export function EntityForm<S extends z.ZodObject>({
   // zodResolver + Zod 4 + RHF 7: as discrepâncias de tipos internos não são
   // expressáveis sem cast — a validação real continua a cargo do Zod em runtime.
   type FormValues = z.infer<S>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const resolver = zodResolver(schema as any) as unknown as Resolver<FormValues>;
+  const resolver = zodResolver(
+    schema as unknown as Parameters<typeof zodResolver>[0],
+  ) as unknown as Resolver<FormValues>;
   const {
     control,
     register,
@@ -123,7 +124,9 @@ export function EntityForm<S extends z.ZodObject>({
       className="grid grid-cols-1 gap-4 sm:grid-cols-2"
     >
       {fields.map((f) => {
-        const errMsg = (errors as Record<string, { message?: string } | undefined>)[f.name]?.message;
+        const errMsg = (
+          errors as Record<string, { message?: string } | undefined>
+        )[f.name]?.message;
         const colSpan = f.span === 2 ? "sm:col-span-2" : "";
         return (
           <div key={f.name} className={cn("flex flex-col gap-1.5", colSpan)}>
@@ -174,11 +177,7 @@ function renderField(
   switch (f.type) {
     case "text":
       return (
-        <Input
-          id={f.name}
-          {...register(f.name)}
-          placeholder={f.placeholder}
-        />
+        <Input id={f.name} {...register(f.name)} placeholder={f.placeholder} />
       );
 
     case "textarea":
@@ -240,7 +239,9 @@ function renderField(
                 if (f.linksTo && v) {
                   const opt = (f.options ?? []).find((o) => o.value === v);
                   if (opt) {
-                    for (const [optKey, formField] of Object.entries(f.linksTo)) {
+                    for (const [optKey, formField] of Object.entries(
+                      f.linksTo,
+                    )) {
                       const val = opt[optKey];
                       // Não sobrescreve com undefined/null — preserva o que o
                       // user já tinha digitado se o source não tem o campo.
@@ -383,6 +384,7 @@ function FileField({
   // URL real (servida pelo Next ou externa) vs texto legado (ex: ID do Zoho).
   const isLink =
     !!value && (value.startsWith("/") || /^https?:\/\//.test(value));
+  const href = value && isLink ? value : null;
   const filename = value ? value.split("/").pop() : null;
 
   return (
@@ -391,9 +393,9 @@ function FileField({
         <div className="flex flex-col gap-2 rounded-md border bg-muted/30 px-2.5 py-2">
           <div className="flex items-center gap-2 text-sm">
             <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            {isLink ? (
+            {href ? (
               <a
-                href={value!}
+                href={href}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-1 truncate hover:underline"
@@ -411,6 +413,17 @@ function FileField({
             )}
           </div>
           <div className="flex gap-1.5">
+            {href && (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                Abrir
+              </a>
+            )}
             <Button
               type="button"
               variant="outline"
