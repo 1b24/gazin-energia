@@ -11,21 +11,7 @@
 import { z } from "zod";
 
 import type { FormFieldConfig } from "@/components/forms/entity-form";
-
-const MESES_PT = [
-  "Janeiro",
-  "Fevereiro",
-  "Março",
-  "Abril",
-  "Maio",
-  "Junho",
-  "Julho",
-  "Agosto",
-  "Setembro",
-  "Outubro",
-  "Novembro",
-  "Dezembro",
-] as const;
+import { MESES_PT } from "@/lib/period";
 
 function nullishToNull(s: string | null | undefined) {
   return s == null || s === "" ? null : s.trim();

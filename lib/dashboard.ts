@@ -15,81 +15,26 @@
  */
 import { auth } from "@/lib/auth";
 import { retryClosedConnection, scopedPrisma } from "@/lib/db";
+import {
+  MESES_PT,
+  getCurrentPeriod,
+  last12MonthsEndingAt,
+  makePeriod,
+  periodFromQuery,
+  type CurrentPeriod,
+} from "@/lib/period";
 
-export const MESES_PT = [
-  "Janeiro",
-  "Fevereiro",
-  "Março",
-  "Abril",
-  "Maio",
-  "Junho",
-  "Julho",
-  "Agosto",
-  "Setembro",
-  "Outubro",
-  "Novembro",
-  "Dezembro",
-] as const;
-
-export interface CurrentPeriod {
-  ano: number;
-  /** índice 0..11 */
-  mesIdx: number;
-  /** "Janeiro".."Dezembro" */
-  mesPt: string;
-  /** "01".."12" */
-  mesNum: string;
-}
-
-export function getCurrentPeriod(): CurrentPeriod {
-  const d = new Date();
-  return makePeriod(d.getFullYear(), d.getMonth());
-}
-
-/** Constrói um `CurrentPeriod` a partir de ano + mesIdx (0..11). */
-export function makePeriod(ano: number, mesIdx: number): CurrentPeriod {
-  const safeIdx = Math.max(0, Math.min(11, mesIdx));
-  return {
-    ano,
-    mesIdx: safeIdx,
-    mesPt: MESES_PT[safeIdx],
-    mesNum: String(safeIdx + 1).padStart(2, "0"),
-  };
-}
-
-/** Resolve ?ano=&mes= dos search params, com fallback pro mês corrente. */
-export function periodFromQuery(query: {
-  ano?: string;
-  mes?: string;
-}): CurrentPeriod {
-  const ano = Number(query.ano);
-  const mes = Number(query.mes);
-  if (
-    !Number.isFinite(ano) ||
-    !Number.isFinite(mes) ||
-    ano < 2000 ||
-    mes < 1 ||
-    mes > 12
-  ) {
-    return getCurrentPeriod();
-  }
-  return makePeriod(ano, mes - 1);
-}
-
-/**
- * Retorna a janela de 12 meses TERMINANDO no `period` informado (mais antigo
- * → mais recente). Ex: period=2026-05 → jun/2025 ... mai/2026.
- */
-export function last12MonthsEndingAt(
-  period: CurrentPeriod = getCurrentPeriod(),
-): { ano: number; mesIdx: number }[] {
-  const out: { ano: number; mesIdx: number }[] = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(period.ano, period.mesIdx - i, 1);
-    out.push({ ano: d.getFullYear(), mesIdx: d.getMonth() });
-  }
-  return out;
-}
+// Re-export para preservar a API pública atual (vários consumidores fazem
+// `import { MESES_PT, periodFromQuery, ... } from "@/lib/dashboard"`).
+// Tipos e funções moraram aqui historicamente; agora vivem em `lib/period.ts`.
+export {
+  MESES_PT,
+  getCurrentPeriod,
+  last12MonthsEndingAt,
+  makePeriod,
+  periodFromQuery,
+};
+export type { CurrentPeriod };
 
 async function getDb(filialFilter?: string) {
   const session = await auth();

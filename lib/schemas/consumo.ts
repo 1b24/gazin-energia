@@ -7,22 +7,8 @@
 import { z } from "zod";
 
 import type { FormFieldConfig } from "@/components/forms/entity-form";
+import { MESES_PT } from "@/lib/period";
 import type { FilialOption } from "./usina";
-
-const MESES_PT = [
-  "Janeiro",
-  "Fevereiro",
-  "Março",
-  "Abril",
-  "Maio",
-  "Junho",
-  "Julho",
-  "Agosto",
-  "Setembro",
-  "Outubro",
-  "Novembro",
-  "Dezembro",
-] as const;
 
 function nullishToNull(s: string | null | undefined) {
   return s == null || s === "" ? null : s.trim();

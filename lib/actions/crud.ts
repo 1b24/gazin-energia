@@ -31,7 +31,16 @@ import { revalidatePath } from "next/cache";
 
 import { Prisma } from "@prisma/client";
 import { serializePrisma } from "@/lib/serialize";
+import {
+  flattenRelations,
+  isSensitiveKey,
+  SENSITIVE_FIELD_PATTERN,
+} from "@/lib/actions/export-helpers";
 import { z } from "zod";
+
+// Re-export para preservar API pública existente (caso outros módulos
+// importem direto de `lib/actions/crud`).
+export { flattenRelations, isSensitiveKey, SENSITIVE_FIELD_PATTERN };
 
 import { auth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
@@ -343,17 +352,9 @@ export function createCrudActions<S extends z.ZodObject>(
 // ---------------------------------------------------------------------------
 // Export helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Campos NUNCA exportados — defesa em profundidade. Mesmo padrão usado pelo
- * audit (lib/audit.ts) para redigir antes de persistir o `before/after`.
- */
-const SENSITIVE_FIELD_PATTERN =
-  /(^|_)(senha|password|hash|token|secret|accesskey|secretkey|apikey)($|[_A-Z])/i;
-
-function isSensitiveKey(key: string): boolean {
-  return SENSITIVE_FIELD_PATTERN.test(key);
-}
+// `SENSITIVE_FIELD_PATTERN`, `isSensitiveKey` e `flattenRelations` vivem em
+// `lib/actions/export-helpers.ts` — re-exports no topo deste arquivo. Helpers
+// puros separados para serem testáveis em Vitest (não dependem de Next/Prisma).
 
 /**
  * Constrói um `include` Prisma com todas as relações 1-1/N-1 (não-list) do
@@ -382,46 +383,4 @@ function buildScalarInclude(
   return Object.keys(include).length > 0 ? include : undefined;
 }
 
-/**
- * Achata relações nesteadas em colunas planas (`filial_codigo`, ...) — XLSX
- * `json_to_sheet` não sabe lidar com objetos aninhados, escreveria
- * "[object Object]" na célula. Aplicado APÓS `serializePrisma`, então não
- * encontra Decimal/BigInt aqui.
- */
-function flattenRelations(
-  rows: Record<string, unknown>[],
-): Record<string, unknown>[] {
-  return rows.map((r) => {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(r)) {
-      if (isSensitiveKey(k)) continue;
-      if (
-        v &&
-        typeof v === "object" &&
-        !Array.isArray(v) &&
-        !(v instanceof Date)
-      ) {
-        for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
-          if (isSensitiveKey(k2)) continue;
-          // Não desce além de um nível — evita explosão e ciclos.
-          if (
-            v2 &&
-            typeof v2 === "object" &&
-            !Array.isArray(v2) &&
-            !(v2 instanceof Date)
-          ) {
-            continue;
-          }
-          if (Array.isArray(v2)) continue;
-          out[`${k}_${k2}`] = v2;
-        }
-      } else if (Array.isArray(v)) {
-        // Listas viram contagem — evita XLSX vazio.
-        out[`${k}_count`] = v.length;
-      } else {
-        out[k] = v;
-      }
-    }
-    return out;
-  });
-}
+// `flattenRelations` mora em `./export-helpers` — re-exportada no topo.

@@ -198,3 +198,72 @@ export function nullIfEmpty(s: unknown): string | null {
   const t = String(s).trim();
   return t === "" ? null : t;
 }
+
+// ----------------------------------------------------------------------------
+// UI formatters — null/undefined-safe, sempre retornam string. Usados em
+// tabelas e analytics. Diferentes do `formatBRL` acima, que é strict (espera
+// number e não trata null).
+//
+// Decisões padronizadas (Step 5 do refactor 2026-05-foundations):
+//   - fallback visual: "—" (em-dash). Nada de "N/A", "-", "".
+//   - fmtPct espera valor em PERCENTUAL (0-100), não fração (0-1). Antes era
+//     incoerente entre Consumo (fração) e Geração/Injeção (percentual).
+//   - fmtCompact usa 0 casas decimais. Antes Consumo usava 1.
+//   - fmtKwh usa 2 casas (precisão de fatura).
+// ----------------------------------------------------------------------------
+
+const FMT_FALLBACK = "—";
+
+function isFiniteNumber(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n);
+}
+
+/** kWh com 2 casas decimais. `1234.5` → `"1.234,50"`. Null → "—". */
+export function fmtKwh(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return FMT_FALLBACK;
+  return n.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Moeda BRL com símbolo. Null → "—". */
+export function fmtBRL(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return FMT_FALLBACK;
+  return n.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+/** Inteiro com separador de milhar, sem decimais. Null → "—". */
+export function fmtInt(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return FMT_FALLBACK;
+  return n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+}
+
+/** Compacto — sem decimais, com separador de milhar. Alias do fmtInt; mantido
+ *  por compatibilidade com call-sites que conceitualmente mostram "compacto"
+ *  (KPI grandes), não inteiro semântico (contagens). */
+export function fmtCompact(n: number | null | undefined): string {
+  return fmtInt(n);
+}
+
+/**
+ * Percentual. Espera valor já em PERCENTUAL (0-100), não fração (0-1).
+ * Para fração, multiplique antes: `fmtPct(0.5 * 100)`.
+ * `50` → `"50,0%"`. Null/Infinity → "—".
+ */
+export function fmtPct(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return FMT_FALLBACK;
+  return `${n.toLocaleString("pt-BR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })}%`;
+}
+
+/** Tarifa em R$/kWh — formata como moeda + sufixo "/kWh". Null → "—". */
+export function fmtRate(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return FMT_FALLBACK;
+  return `${fmtBRL(n)}/kWh`;
+}
