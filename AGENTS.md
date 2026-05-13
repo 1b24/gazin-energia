@@ -4,6 +4,21 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Schema changes
+
+Depois de qualquer mudança em `prisma/schema.prisma` que rode `prisma
+generate` (mesmo via `prisma db push`), o Next dev server **precisa ser
+reiniciado**. HMR não recarrega `node_modules/@prisma/client` — o cliente
+antigo continua na memória do processo até a próxima inicialização, e
+qualquer model novo aparece como `undefined` (`Cannot read properties of
+undefined (reading 'findMany')`).
+
+Sequência segura:
+1. Editar `schema.prisma`
+2. `npx prisma db push` (ou `migrate dev` quando shadow DB disponível)
+3. `npx prisma generate` (db push já roda, double-check)
+4. **Reiniciar o `npm run dev`** — sem isso, models novos quebram.
+
 # Refactors
 
 Antes de modificar qualquer arquivo, verifique se ele está sob escopo de um
