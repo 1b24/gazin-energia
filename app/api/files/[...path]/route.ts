@@ -4,12 +4,18 @@
  * - Local backend: stream do payload do disco.
  * - S3/R2 backend: 302 redirect pra presigned URL (válida por 15min).
  *
- * Sempre exige sessão autenticada — bucket em si é privado por design.
+ * Autorização (Step 7 do refactor 2026-05-foundations):
+ *   - 401 sem sessão.
+ *   - 403 se nenhuma entidade ATIVA referencia este arquivo (órfão).
+ *   - 403 se o usuário não tem escopo sobre a entidade dona (gestor_filial
+ *     X tentando ler arquivo da filial Y).
+ *   - Admin: passa, exceto em arquivo órfão.
  */
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { userCanAccessFile } from "@/lib/file-auth";
 import { readFileFor } from "@/lib/storage";
 
 // SVG / HTML / JS NÃO ESTÃO AQUI — servidos como octet-stream + attachment.
@@ -66,6 +72,14 @@ export async function GET(
   }
   const [bucket, ...keyParts] = path;
   const key = keyParts.join("/");
+
+  // Autorização fina — checa ownership do arquivo contra escopo do user.
+  // Resposta uniforme 403 tanto para "não autorizado" quanto "órfão", para
+  // não vazar via mensagem se o arquivo existe ou não.
+  const allowed = await userCanAccessFile(session.user, bucket, key);
+  if (!allowed) {
+    return new NextResponse("Não autorizado.", { status: 403 });
+  }
 
   const result = await readFileFor(bucket, key);
   if (!result) {

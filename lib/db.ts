@@ -51,7 +51,7 @@ const MODEL_SCOPE: Record<string, "id" | "filialId" | "usina"> = {
   licenca: "usina",
 };
 
-type ScopedUser = { role?: string; filialId?: string | null } | null | undefined;
+export type ScopedUser = { role?: string; filialId?: string | null } | null | undefined;
 
 /**
  * Devolve um cliente Prisma escopado para a filial do usuário. Admins recebem

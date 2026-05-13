@@ -7,6 +7,10 @@
  *  - lib/db.ts                        (define o singleton + scopedPrisma)
  *  - lib/auth.ts                      (Credentials provider — login pré-session)
  *  - lib/actions/crud.ts              (factory mutate; faz pre-check via scopedPrisma)
+ *  - lib/file-auth.ts                 (resolve entidade pela URL ANTES do RBAC;
+ *                                      recebe `user` como parâmetro e delega
+ *                                      pra userCanAccessId — não chama auth()
+ *                                      diretamente porque o caller já fez)
  *  - prisma/seed.ts                   (CLI de seed)
  *  - scripts/import-raw.ts            (CLI de import)
  *  - scripts/validate-migration.ts    (CLI de validate)
@@ -27,6 +31,7 @@ const ALLOWLIST = new Set(
     "lib/db.ts",
     "lib/auth.ts",
     "lib/actions/crud.ts",
+    "lib/file-auth.ts",
     "prisma/seed.ts",
     "scripts/import-raw.ts",
     "scripts/validate-migration.ts",
