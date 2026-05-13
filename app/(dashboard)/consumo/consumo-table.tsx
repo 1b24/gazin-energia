@@ -14,8 +14,11 @@ import {
   Receipt,
   Zap,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo } from "react";
 
+import { Bar } from "@/components/analytics/bar";
+import { EmptyAnalytics } from "@/components/analytics/empty-state";
+import { MetricCard } from "@/components/analytics/metric-card";
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import {
@@ -25,6 +28,15 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MultiSelect } from "@/components/ui/multi-select";
+import {
+  fmtBRL,
+  fmtCompact,
+  fmtKwh,
+  fmtPct,
+  fmtRate,
+} from "@/lib/format";
+import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
+import { mesIndex, periodKey, periodoLabel } from "@/lib/period";
 import { buildConsumoFormFields, consumoSchema } from "@/lib/schemas/consumo";
 import type { FilialOption } from "@/lib/schemas/usina";
 import type { Serialized } from "@/lib/serialize";
@@ -40,71 +52,13 @@ export type ConsumoRow = Serialized<Consumo> & {
   variacaoFaturaPct?: number | null;
 };
 
-const fmtKwh = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+// Formatters (`fmtKwh`, `fmtBRL`, `fmtCompact`, `fmtPct`, `fmtRate`) movidos
+// para `lib/format.ts` no Step 5 do refactor 2026-05-foundations. `fmtPct`
+// agora espera percentual (0-100), não fração (0-1) — call-sites locais que
+// passavam `ponta/total` foram ajustados para `(ponta/total) * 100`.
 
-const fmtBRL = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      });
-
-const fmtCompact = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        maximumFractionDigits: 1,
-      });
-
-const fmtPct = (n: number | null | undefined) =>
-  n == null || !Number.isFinite(n)
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        style: "percent",
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-      });
-
-const fmtRate = (n: number | null | undefined) =>
-  n == null || !Number.isFinite(n) ? "—" : `${fmtBRL(n)}/kWh`;
-
-const MESES_PT = [
-  "janeiro",
-  "fevereiro",
-  "março",
-  "abril",
-  "maio",
-  "junho",
-  "julho",
-  "agosto",
-  "setembro",
-  "outubro",
-  "novembro",
-  "dezembro",
-];
-
-function mesIndex(mes: string | null | undefined) {
-  if (!mes) return -1;
-  const normalized = mes.trim().toLowerCase();
-  return MESES_PT.findIndex((m) => m === normalized);
-}
-
-function periodKey(row: ConsumoRow) {
-  const ano = row.ano ?? 0;
-  const mesIdx = mesIndex(row.mes);
-  return `${ano}-${String(mesIdx + 1).padStart(2, "0")}`;
-}
-
-function periodoLabel(row: ConsumoRow) {
-  return row.mes && row.ano ? `${row.mes}/${row.ano}` : "Sem período";
-}
+// MESES_PT, mesIndex, periodKey, periodoLabel migraram para `lib/period.ts`
+// no Step 4 do refactor 2026-05-foundations.
 
 function filialLabel(row: ConsumoRow) {
   if (row.filial) {
@@ -143,133 +97,23 @@ function valorKwhFp(row: ConsumoRow) {
   return row.valor1 ?? 0;
 }
 
-function MetricCard({
-  title,
-  value,
-  description,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  description?: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card size="sm" className="min-h-28">
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-xs font-medium text-muted-foreground">
-            {title}
-          </CardTitle>
-          <div className="text-muted-foreground">{icon}</div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col justify-end gap-1">
-        <div className="text-xl font-semibold leading-tight [overflow-wrap:anywhere]">
-          {value}
-        </div>
-        {description ? (
-          <div className="text-xs text-muted-foreground">{description}</div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Bar({
-  value,
-  max,
-  className = "bg-primary",
-}: {
-  value: number;
-  max: number;
-  className?: string;
-}) {
-  const width =
-    max > 0 && value > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
-  return (
-    <div className="h-2 rounded-full bg-muted">
-      <div
-        className={`h-full rounded-full ${className}`}
-        style={{ width: `${width}%` }}
-      />
-    </div>
-  );
-}
-
-function EmptyAnalytics() {
-  return (
-    <Card>
-      <CardContent className="py-6 text-sm text-muted-foreground">
-        Sem dados de consumo para analisar.
-      </CardContent>
-    </Card>
-  );
-}
+// MetricCard, Bar, EmptyAnalytics movidos para `components/analytics/*`
+// no Step 5 do refactor 2026-05-foundations.
 
 function ConsumoAnalytics({ rows }: { rows: ConsumoRow[] }) {
-  // Opções de período (ordenado cronologicamente).
-  const periodOptions = useMemo(() => {
-    const periods = new Map<
-      string,
-      { key: string; label: string; ano: number; mesIdx: number }
-    >();
-    for (const row of rows) {
-      const ano = row.ano ?? 0;
-      const mesIdx = mesIndex(row.mes);
-      if (ano <= 0 || mesIdx < 0) continue;
-      periods.set(periodKey(row), {
-        key: periodKey(row),
-        label: periodoLabel(row),
-        ano,
-        mesIdx,
-      });
-    }
-    return Array.from(periods.values()).sort(
-      (a, b) => a.ano - b.ano || a.mesIdx - b.mesIdx,
-    );
-  }, [rows]);
-
-  // Opções de UF (apenas as que aparecem nos dados, com contagem).
-  const ufOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const row of rows) {
-      const uf = ufOf(row);
-      if (!uf) continue;
-      counts.set(uf, (counts.get(uf) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
-      .sort(([a], [b]) => a.localeCompare(b, "pt-BR"))
-      .map(([value, count]) => ({
-        value,
-        label: value,
-        hint: String(count),
-      }));
-  }, [rows]);
-
-  // Multi-seleção: array vazio = sem filtro (mostra tudo).
-  // Default do período = mais recente, preservando comportamento anterior:
-  // analytics abrem focados no último mês com dados, sem somar histórico.
-  // Usuário pode marcar mais períodos ou limpar pra ver tudo.
-  const [selectedPeriods, setSelectedPeriods] = useState<string[]>(() => {
-    const latest = periodOptions.at(-1)?.key;
-    return latest ? [latest] : [];
-  });
-  const [selectedUfs, setSelectedUfs] = useState<string[]>([]);
-
-  const selectedRows = useMemo(() => {
-    if (selectedPeriods.length === 0 && selectedUfs.length === 0) return rows;
-    const periodSet = new Set(selectedPeriods);
-    const ufSet = new Set(selectedUfs);
-    return rows.filter((row) => {
-      if (periodSet.size > 0 && !periodSet.has(periodKey(row))) return false;
-      if (ufSet.size > 0) {
-        const uf = ufOf(row);
-        if (!uf || !ufSet.has(uf)) return false;
-      }
-      return true;
-    });
-  }, [rows, selectedPeriods, selectedUfs]);
+  // Filtros multi-select (período + UF) com filtragem AND. Default: último
+  // período selecionado. Hook em `lib/hooks/use-analytics-filters.ts` para
+  // não duplicar lógica entre Consumo, Geração e Injeção.
+  const {
+    ufOptions,
+    selectedPeriods,
+    setSelectedPeriods,
+    selectedUfs,
+    setSelectedUfs,
+    filteredRows: selectedRows,
+    filterSummary,
+    periodMultiOptions,
+  } = useAnalyticsFilters(rows, { uf: ufOf });
 
   const data = useMemo(() => {
     const total = selectedRows.reduce((acc, row) => acc + consumoTotal(row), 0);
@@ -429,31 +273,10 @@ function ConsumoAnalytics({ rows }: { rows: ConsumoRow[] }) {
     };
   }, [selectedRows]);
 
-  if (rows.length === 0) return <EmptyAnalytics />;
+  if (rows.length === 0) return <EmptyAnalytics message="Sem dados de consumo para analisar." />;
 
-  const filterSummary = (() => {
-    const parts: string[] = [];
-    if (selectedPeriods.length === 0) parts.push("todos os períodos");
-    else if (selectedPeriods.length === 1) {
-      parts.push(
-        periodOptions.find((p) => p.key === selectedPeriods[0])?.label ??
-          selectedPeriods[0],
-      );
-    } else parts.push(`${selectedPeriods.length} períodos`);
-    if (selectedUfs.length > 0) {
-      parts.push(
-        selectedUfs.length === 1
-          ? `UF ${selectedUfs[0]}`
-          : `${selectedUfs.length} UFs`,
-      );
-    }
-    return parts.join(" · ");
-  })();
+  // `filterSummary` e `periodMultiOptions` vêm do hook `useAnalyticsFilters`.
 
-  const periodMultiOptions = periodOptions.map((option) => ({
-    value: option.key,
-    label: option.label,
-  }));
   const maxTotal = Math.max(...data.topTotal.map((item) => item.total), 0);
   const maxPonta = Math.max(...data.topPonta.map((item) => item.ponta), 0);
   const maxForaPonta = Math.max(
@@ -509,7 +332,7 @@ function ConsumoAnalytics({ rows }: { rows: ConsumoRow[] }) {
           description={
             <>
               <span className="block">
-                {fmtPct(data.total > 0 ? data.ponta / data.total : null)} do
+                {fmtPct(data.total > 0 ? (data.ponta / data.total) * 100 : null)} do
                 consumo
               </span>
               <span className="block">
@@ -525,7 +348,7 @@ function ConsumoAnalytics({ rows }: { rows: ConsumoRow[] }) {
           description={
             <>
               <span className="block">
-                {fmtPct(data.total > 0 ? data.foraPonta / data.total : null)} do
+                {fmtPct(data.total > 0 ? (data.foraPonta / data.total) * 100 : null)} do
                 consumo
               </span>
               <span className="block">

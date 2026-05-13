@@ -11,12 +11,25 @@ import {
   Paperclip,
   PlugZap,
 } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
 
+import { Bar } from "@/components/analytics/bar";
+import { EmptyAnalytics } from "@/components/analytics/empty-state";
+import { MetricCard } from "@/components/analytics/metric-card";
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MultiSelect } from "@/components/ui/multi-select";
+import {
+  fmtBRL,
+  fmtCompact,
+  fmtKwh,
+  fmtPct,
+  fmtRate,
+} from "@/lib/format";
+import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
+import { mesIndex } from "@/lib/period";
 import {
   buildInjecaoFormFields,
   injecaoSchema,
@@ -28,61 +41,18 @@ import type { Serialized } from "@/lib/serialize";
 import * as actions from "./actions";
 
 export type InjecaoRow = Serialized<Injecao> & {
-  filial: Pick<Filial, "id" | "codigo" | "mercadoLivre"> | null;
+  filial: Pick<Filial, "id" | "codigo" | "mercadoLivre" | "uf"> | null;
   fornecedor: Pick<Fornecedor, "id" | "nome"> | null;
 };
 
-const fmtKwh = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+// Formatters movidos para `lib/format.ts` no Step 5 do refactor
+// 2026-05-foundations. Bug pré-existente: `fmtRate` local tinha "â€”" (mojibake
+// do "—") em vez do em-dash correto. Corrigido na consolidação.
 
-const fmtBRL = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      });
-
-const fmtCompact = (n: number) =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-
-const fmtRate = (n: number | null | undefined) =>
-  n == null || !Number.isFinite(n)
-    ? "â€”"
-    : n.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-
-const fmtPct = (n: number) =>
-  `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
-
-const MESES_PT = [
-  "Janeiro",
-  "Fevereiro",
-  "MarÃ§o",
-  "Abril",
-  "Maio",
-  "Junho",
-  "Julho",
-  "Agosto",
-  "Setembro",
-  "Outubro",
-  "Novembro",
-  "Dezembro",
-];
-
-function mesIndex(mes: string | null | undefined) {
-  if (!mes) return 99;
-  const normalized = mes.trim().toLowerCase();
-  const idx = MESES_PT.findIndex((m) => m.toLowerCase() === normalized);
-  return idx >= 0 ? idx : 99;
-}
+// MESES_PT + mesIndex importados de `lib/period.ts` (Step 4 do refactor
+// 2026-05-foundations). Bug pré-existente: o array local tinha "MarÃ§o"
+// (encoding corrupto), fazendo `mesIndex("Março")` retornar 99 — o que
+// silenciosamente afetava agregação por período em Março. Resolvido.
 
 function fornecedorLabel(row: InjecaoRow) {
   return (
@@ -134,76 +104,41 @@ function FileLink({ url }: { url: string | null | undefined }) {
   );
 }
 
-function MetricCard({
-  title,
-  value,
-  description,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  description?: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card size="sm" className="min-h-28">
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-xs font-medium text-muted-foreground">
-            {title}
-          </CardTitle>
-          <div className="text-muted-foreground">{icon}</div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col justify-end gap-1">
-        <div className="truncate text-2xl font-semibold tracking-tight">
-          {value}
-        </div>
-        {description ? (
-          <div className="text-xs text-muted-foreground">{description}</div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Bar({
-  value,
-  max,
-  className = "bg-primary",
-}: {
-  value: number;
-  max: number;
-  className?: string;
-}) {
-  const width = max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
-  return (
-    <div className="h-2 rounded-full bg-muted">
-      <div
-        className={`h-full rounded-full ${className}`}
-        style={{ width: `${width}%` }}
-      />
-    </div>
-  );
-}
-
-function EmptyAnalytics() {
-  return (
-    <Card>
-      <CardContent className="py-6 text-sm text-muted-foreground">
-        Sem dados de injeção para analisar.
-      </CardContent>
-    </Card>
-  );
-}
+// MetricCard, Bar, EmptyAnalytics movidos para `components/analytics/*` no
+// Step 5. Mudança visual no MetricCard: estilo unificado usa `text-xl` +
+// `overflow-wrap:anywhere` em vez de `text-2xl` + `truncate` — valores longos
+// quebram linha em vez de serem cortados.
 
 function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
+  // Filtros multi-select (período + UF) com filtragem AND. UF vem de
+  // `filial.uf`. Hook em `lib/hooks/use-analytics-filters.ts`.
+  const {
+    ufOptions,
+    selectedPeriods,
+    setSelectedPeriods,
+    selectedUfs,
+    setSelectedUfs,
+    filteredRows: scopedRows,
+    filterSummary,
+    periodMultiOptions,
+  } = useAnalyticsFilters(rows, {
+    uf: (row) => row.filial?.uf?.trim() || null,
+  });
+
   const data = useMemo(() => {
-    const totalKwh = rows.reduce((acc, row) => acc + rowKwh(row), 0);
-    const totalValor = rows.reduce((acc, row) => acc + rowValor(row), 0);
-    const totalValor1 = rows.reduce((acc, row) => acc + (row.valor1 ?? 0), 0);
-    const totalValor2 = rows.reduce((acc, row) => acc + (row.valor2 ?? 0), 0);
-    const ucs = new Set(rows.map((row) => row.uc?.trim()).filter(Boolean));
+    const totalKwh = scopedRows.reduce((acc, row) => acc + rowKwh(row), 0);
+    const totalValor = scopedRows.reduce((acc, row) => acc + rowValor(row), 0);
+    const totalValor1 = scopedRows.reduce(
+      (acc, row) => acc + (row.valor1 ?? 0),
+      0,
+    );
+    const totalValor2 = scopedRows.reduce(
+      (acc, row) => acc + (row.valor2 ?? 0),
+      0,
+    );
+    const ucs = new Set(
+      scopedRows.map((row) => row.uc?.trim()).filter(Boolean),
+    );
 
     const fornecedores = new Map<
       string,
@@ -220,7 +155,7 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
       { label: string; ano: number; mesIdx: number; kwh: number; valor: number }
     >();
 
-    for (const row of rows) {
+    for (const row of scopedRows) {
       const fornecedor = fornecedorLabel(row);
       const currentFornecedor = fornecedores.get(fornecedor) ?? {
         label: fornecedor,
@@ -237,10 +172,10 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
 
       const mesIdx = mesIndex(row.mes);
       const ano = row.ano ?? 0;
-      const periodKey = `${ano}-${String(mesIdx).padStart(2, "0")}`;
+      const periodK = `${ano}-${String(mesIdx).padStart(2, "0")}`;
       const periodLabel =
         row.mes && row.ano ? `${row.mes}/${row.ano}` : "Sem período";
-      const currentPeriod = periodos.get(periodKey) ?? {
+      const currentPeriod = periodos.get(periodK) ?? {
         label: periodLabel,
         ano,
         mesIdx,
@@ -249,7 +184,7 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
       };
       currentPeriod.kwh += rowKwh(row);
       currentPeriod.valor += rowValor(row);
-      periodos.set(periodKey, currentPeriod);
+      periodos.set(periodK, currentPeriod);
     }
 
     const fornecedoresRank = [...fornecedores.values()]
@@ -264,23 +199,25 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
       (a, b) => a.ano - b.ano || a.mesIdx - b.mesIdx,
     );
 
-    const topKwh = [...rows].sort((a, b) => rowKwh(b) - rowKwh(a)).slice(0, 5);
-    const topValor = [...rows]
+    const topKwh = [...scopedRows]
+      .sort((a, b) => rowKwh(b) - rowKwh(a))
+      .slice(0, 5);
+    const topValor = [...scopedRows]
       .sort((a, b) => rowValor(b) - rowValor(a))
       .slice(0, 5);
 
-    const semFornecedor = rows.filter(
+    const semFornecedor = scopedRows.filter(
       (row) => !row.fornecedor?.nome && !row.fornecedorRaw,
     ).length;
-    const fornecedorSemVinculo = rows.filter(
+    const fornecedorSemVinculo = scopedRows.filter(
       (row) => row.fornecedorRaw && !row.fornecedor,
     ).length;
-    const filialSemVinculo = rows.filter(
+    const filialSemVinculo = scopedRows.filter(
       (row) => row.filialCodigoRaw && !row.filial,
     ).length;
-    const semAnexo = rows.filter((row) => !row.anexoFechamento).length;
-    const kwhZerado = rows.filter((row) => rowKwh(row) <= 0).length;
-    const valorZerado = rows.filter((row) => rowValor(row) <= 0).length;
+    const semAnexo = scopedRows.filter((row) => !row.anexoFechamento).length;
+    const kwhZerado = scopedRows.filter((row) => rowKwh(row) <= 0).length;
+    const valorZerado = scopedRows.filter((row) => rowValor(row) <= 0).length;
 
     return {
       totalKwh,
@@ -301,9 +238,10 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
         { label: "Valor zerado", value: valorZerado },
       ],
     };
-  }, [rows]);
+  }, [scopedRows]);
 
-  if (rows.length === 0) return <EmptyAnalytics />;
+  if (rows.length === 0)
+    return <EmptyAnalytics message="Sem dados de injeção para analisar." />;
 
   const leader = data.fornecedoresRank[0];
   const maxFornecedorKwh = Math.max(
@@ -320,11 +258,41 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
 
   return (
     <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Visão de injeção</h2>
+          <div className="text-sm text-muted-foreground">
+            Filtros: {filterSummary}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <MultiSelect
+            label="Período"
+            options={periodMultiOptions}
+            value={selectedPeriods}
+            onChange={setSelectedPeriods}
+            placeholderAll="Todos os períodos"
+            searchPlaceholder="Buscar período..."
+            width="w-56"
+          />
+          <MultiSelect
+            label="UF"
+            options={ufOptions}
+            value={selectedUfs}
+            onChange={setSelectedUfs}
+            placeholderAll="Todos os estados"
+            searchPlaceholder="Buscar UF..."
+            width="w-44"
+            disabled={ufOptions.length === 0}
+          />
+        </div>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           title="Injeção total"
           value={`${fmtCompact(data.totalKwh)} kWh`}
-          description={`${data.ucsCount} UC(s) em ${rows.length} registro(s)`}
+          description={`${data.ucsCount} UC(s) em ${scopedRows.length} registro(s)`}
           icon={<PlugZap className="h-4 w-4" />}
         />
         <MetricCard
@@ -376,7 +344,7 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
                       {fmtCompact(item.kwh)} kWh
                     </div>
                     <div className="text-muted-foreground">
-                      {fmtBRL(item.valor)} · R$/kWh {fmtRate(item.valorPorKwh)}
+                      {fmtBRL(item.valor)} · {fmtRate(item.valorPorKwh)}
                     </div>
                   </div>
                 </div>

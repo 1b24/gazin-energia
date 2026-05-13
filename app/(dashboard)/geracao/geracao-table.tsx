@@ -21,8 +21,11 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useMemo, useState, useTransition } from "react";
 
+import { Bar } from "@/components/analytics/bar";
+import { EmptyAnalytics } from "@/components/analytics/empty-state";
+import { MetricCard } from "@/components/analytics/metric-card";
 import {
   DetailField,
   type EntityRelation,
@@ -32,13 +35,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { MultiSelect } from "@/components/ui/multi-select";
+import { fmtCompact, fmtPct } from "@/lib/format";
+import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
+import { mesIndex, periodKey, periodoLabel } from "@/lib/period";
 import {
   buildGeracaoFormFields,
   geracaoSchema,
@@ -49,7 +49,7 @@ import type { Serialized } from "@/lib/serialize";
 import * as actions from "./actions";
 
 export type GeracaoRow = Serialized<Geracao> & {
-  usina: Pick<Usina, "id" | "nome"> | null;
+  usina: Pick<Usina, "id" | "nome" | "uf"> | null;
   dias: Serialized<GeracaoDia>[];
 };
 
@@ -61,13 +61,8 @@ function formatKwh(n: number | null | undefined): string {
   });
 }
 
-const fmtCompact = (n: number) =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-
-const fmtPct = (n: number | null | undefined) =>
-  n == null || !Number.isFinite(n)
-    ? "—"
-    : `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+// `fmtCompact`, `fmtPct` movidos para `lib/format.ts` no Step 5 do refactor
+// 2026-05-foundations.
 
 function totalKwh(dias: GeracaoRow["dias"]): number {
   return dias.reduce((acc, d) => acc + (d.kwh ?? 0), 0);
@@ -77,21 +72,9 @@ function diasComDado(dias: GeracaoRow["dias"]): number {
   return dias.filter((d) => d.kwh != null && d.kwh > 0).length;
 }
 
-const MESES_PT = [
-  "Janeiro",
-  "Fevereiro",
-  "Março",
-  "Abril",
-  "Maio",
-  "Junho",
-  "Julho",
-  "Agosto",
-  "Setembro",
-  "Outubro",
-  "Novembro",
-  "Dezembro",
-] as const;
-
+// MESES_PT, mesIndex, periodKey movidos pra `lib/period.ts` (Step 4 do
+// refactor 2026-05-foundations). `diasNoMes` continua local — específico do
+// domínio de Geração (calcula meta diária × dias do mês).
 function diasNoMes(
   ano: number | null | undefined,
   mes: string | null | undefined,
@@ -99,20 +82,6 @@ function diasNoMes(
   const mesIdx = mesIndex(mes);
   if (ano == null || mesIdx < 0) return 31;
   return new Date(ano, mesIdx + 1, 0).getDate();
-}
-
-function mesIndex(mes: string | null | undefined) {
-  if (!mes) return -1;
-  const normalized = mes.trim().toLowerCase();
-  return (MESES_PT as readonly string[]).findIndex(
-    (m) => m.toLowerCase() === normalized,
-  );
-}
-
-function periodKey(row: GeracaoRow) {
-  const ano = row.ano ?? 0;
-  const mesIdx = mesIndex(row.mes);
-  return `${ano}-${String(mesIdx).padStart(2, "0")}`;
 }
 
 function periodSort(
@@ -138,63 +107,9 @@ function usinaLabel(g: GeracaoRow) {
   return g.usina?.nome?.trim() || g.nomeUsinaRaw?.trim() || "Sem usina";
 }
 
-function periodoLabel(g: GeracaoRow) {
-  return g.mes && g.ano ? `${g.mes}/${g.ano}` : "Sem período";
-}
+// MetricCard movido para `components/analytics/metric-card.tsx` (Step 5).
 
-function MetricCard({
-  title,
-  value,
-  description,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  description?: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card size="sm" className="min-h-28">
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-xs font-medium text-muted-foreground">
-            {title}
-          </CardTitle>
-          <div className="text-muted-foreground">{icon}</div>
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col justify-end gap-1">
-        <div className="text-xl font-semibold leading-tight [overflow-wrap:anywhere]">
-          {value}
-        </div>
-        {description ? (
-          <div className="text-xs text-muted-foreground">{description}</div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Bar({
-  value,
-  max,
-  className = "bg-primary",
-}: {
-  value: number;
-  max: number;
-  className?: string;
-}) {
-  const width =
-    max > 0 && value > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
-  return (
-    <div className="h-2 rounded-full bg-muted">
-      <div
-        className={`h-full rounded-full ${className}`}
-        style={{ width: `${width}%` }}
-      />
-    </div>
-  );
-}
+// Bar movido para `components/analytics/bar.tsx` (Step 5).
 
 function progressPct(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return 0;
@@ -208,70 +123,23 @@ function metaBarClass(value: number | null | undefined) {
   return "bg-destructive";
 }
 
-function EmptyAnalytics() {
-  return (
-    <Card>
-      <CardContent className="py-6 text-sm text-muted-foreground">
-        Sem dados de geração para analisar.
-      </CardContent>
-    </Card>
-  );
-}
+// EmptyAnalytics movido para `components/analytics/empty-state.tsx` (Step 5).
 
 function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
-  const periodOptions = useMemo(() => {
-    const periods = new Map<
-      string,
-      { key: string; label: string; ano: number; mesIdx: number }
-    >();
-
-    for (const row of rows) {
-      const ano = row.ano ?? 0;
-      const mesIdx = mesIndex(row.mes);
-      if (ano <= 0 || mesIdx < 0) continue;
-      const key = periodKey(row);
-      periods.set(key, {
-        key,
-        label: periodoLabel(row),
-        ano,
-        mesIdx,
-      });
-    }
-
-    return [...periods.values()].sort(periodSort);
-  }, [rows]);
-  const latestPeriodKey = periodOptions.at(-1)?.key ?? "__all__";
-  const [selectedPeriodKey, setSelectedPeriodKey] = useState<string | null>(
-    null,
-  );
-  const selectedPeriodIsValid =
-    selectedPeriodKey === "__all__" ||
-    periodOptions.some((option) => option.key === selectedPeriodKey);
-  const effectivePeriodKey =
-    selectedPeriodIsValid && selectedPeriodKey
-      ? selectedPeriodKey
-      : latestPeriodKey;
-  const selectedRows = useMemo(
-    () =>
-      effectivePeriodKey === "__all__"
-        ? rows
-        : rows.filter((row) => periodKey(row) === effectivePeriodKey),
-    [effectivePeriodKey, rows],
-  );
-  const selectedPeriodLabel =
-    effectivePeriodKey === "__all__"
-      ? "Todos os períodos"
-      : (periodOptions.find((option) => option.key === effectivePeriodKey)
-          ?.label ?? "Período mais recente");
-  const periodItems = useMemo(
-    () => [
-      { value: "__all__", label: "Todos os períodos" },
-      ...[...periodOptions]
-        .reverse()
-        .map((option) => ({ value: option.key, label: option.label })),
-    ],
-    [periodOptions],
-  );
+  // Filtros multi-select (período + UF) com filtragem AND. UF vem de
+  // `usina.uf`. Hook em `lib/hooks/use-analytics-filters.ts`.
+  const {
+    ufOptions,
+    selectedPeriods,
+    setSelectedPeriods,
+    selectedUfs,
+    setSelectedUfs,
+    filteredRows: selectedRows,
+    filterSummary,
+    periodMultiOptions,
+  } = useAnalyticsFilters(rows, {
+    uf: (row) => row.usina?.uf?.trim() || null,
+  });
 
   const data = useMemo(() => {
     const totalRealizado = selectedRows.reduce(
@@ -378,7 +246,8 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
     };
   }, [selectedRows]);
 
-  if (rows.length === 0) return <EmptyAnalytics />;
+  if (rows.length === 0)
+    return <EmptyAnalytics message="Sem dados de geração para analisar." />;
 
   const maxPeriodo = Math.max(
     ...data.periodosRank.map((item) => item.realizado),
@@ -388,32 +257,34 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <div className="text-sm font-medium">Indicadores de geração</div>
           <div className="text-xs text-muted-foreground">
-            Período analisado: {selectedPeriodLabel}
+            Filtros: {filterSummary}
           </div>
         </div>
-        <Select
-          items={periodItems}
-          value={effectivePeriodKey}
-          onValueChange={(value) => setSelectedPeriodKey(value)}
-        >
-          <SelectTrigger className="h-8 w-full text-xs sm:w-56">
-            <SelectValue placeholder="Período" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Todos os períodos</SelectItem>
-            {periodItems
-              .filter((item) => item.value !== "__all__")
-              .map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-end gap-2">
+          <MultiSelect
+            label="Período"
+            options={periodMultiOptions}
+            value={selectedPeriods}
+            onChange={setSelectedPeriods}
+            placeholderAll="Todos os períodos"
+            searchPlaceholder="Buscar período..."
+            width="w-56"
+          />
+          <MultiSelect
+            label="UF"
+            options={ufOptions}
+            value={selectedUfs}
+            onChange={setSelectedUfs}
+            placeholderAll="Todos os estados"
+            searchPlaceholder="Buscar UF..."
+            width="w-44"
+            disabled={ufOptions.length === 0}
+          />
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
