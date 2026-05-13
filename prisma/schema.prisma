@@ -697,10 +697,10 @@ model TarifaEnergia {
   distribuidora   Distribuidora? @relation(fields: [distribuidoraId], references: [id], onDelete: Restrict)
   distribuidoraId String?
 
-  /// R$/kWh — precisão 4 decimais para acomodar tarifas com centavos finos
-  /// (ex: 0,4567 R$/kWh). Decimal evita ruído de float.
-  valorPonta     Decimal? @db.Decimal(10, 4)
-  valorForaPonta Decimal? @db.Decimal(10, 4)
+  /// R$/kWh — precisão 6 decimais para acomodar tarifas ANEEL e contratos
+  /// (ex: 0,530520 R$/kWh). Decimal evita ruído de float.
+  valorPonta     Decimal? @db.Decimal(12, 6)
+  valorForaPonta Decimal? @db.Decimal(12, 6)
 
   vigenciaInicio DateTime
   /// null = tarifa atual. Preencher quando uma tarifa nova entrar em vigor.

@@ -32,14 +32,14 @@ const fmtDate = (d: Date | string | null | undefined) => {
   return Number.isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("pt-BR");
 };
 
-/** Formata um Decimal/number com 4 casas decimais (R$/kWh). */
+/** Formata um Decimal/number com 6 casas decimais (R$/kWh). */
 function fmtRateValue(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return n.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: 6,
+    maximumFractionDigits: 6,
   });
 }
 
