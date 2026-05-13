@@ -114,5 +114,8 @@ export const filialFormFields: FormFieldConfig[] = [
     span: 1,
   },
   { name: "usuario", label: "Usuário",  type: "text", span: 1 },
-  { name: "senha",   label: "Senha",    type: "text", span: 1 },
+  // `senha` propositalmente AUSENTE do form genérico — é credencial do portal
+  // da distribuidora e nunca deve atravessar a borda RSC→Client pelo payload
+  // de lista. Edição via fluxo admin dedicado (TODO). Mantida no `filialSchema`
+  // pra que o seed/import legado e o eventual endpoint admin continuem aceitando.
 ];

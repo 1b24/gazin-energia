@@ -134,7 +134,7 @@ export async function updateItens(
     });
     await recordAudit(
       {
-        actor: { id: session.user.id },
+        actor: { id: session.user.id, email: session.user.email },
         entityType: "CronogramaLimpeza",
         entityId: cronogramaId,
         action: "update",

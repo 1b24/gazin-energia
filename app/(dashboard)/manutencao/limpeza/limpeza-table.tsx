@@ -75,8 +75,9 @@ const columns: ColumnDef<LimpezaRow, unknown>[] = [
   },
   {
     id: "itensCount",
+    accessorFn: (row) =>
+      row.itens.filter((item) => item.status === "concluida").length,
     header: "Limpezas",
-    enableSorting: false,
     cell: ({ row }) => {
       const itens = row.original.itens;
       const total = itens.length;
@@ -90,8 +91,25 @@ const columns: ColumnDef<LimpezaRow, unknown>[] = [
   },
   {
     id: "proxima",
+    accessorFn: (row) => {
+      const today = new Date();
+      const future = row.itens
+        .filter(
+          (i) =>
+            i.dataPlanejada &&
+            new Date(i.dataPlanejada) >= today &&
+            i.status !== "concluida",
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.dataPlanejada!).getTime() -
+            new Date(b.dataPlanejada!).getTime(),
+        )[0];
+      return future?.dataPlanejada
+        ? new Date(future.dataPlanejada).getTime()
+        : null;
+    },
     header: "Próxima planejada",
-    enableSorting: false,
     cell: ({ row }) => {
       const today = new Date();
       const future = row.original.itens
@@ -238,11 +256,7 @@ function ItensPanel({ cronograma }: { cronograma: LimpezaRow }) {
               <X className="mr-1 h-3.5 w-3.5" />
               Cancelar
             </Button>
-            <Button
-              size="sm"
-              onClick={saveEdit}
-              disabled={pending || !isDirty}
-            >
+            <Button size="sm" onClick={saveEdit} disabled={pending || !isDirty}>
               <Save className="mr-1 h-3.5 w-3.5" />
               {pending ? "Salvando..." : "Salvar"}
             </Button>
@@ -332,7 +346,9 @@ function ItensPanel({ cronograma }: { cronograma: LimpezaRow }) {
                       </select>
                     ) : d.status ? (
                       <Badge
-                        variant={statusBadgeVariant(d.status as StatusManutencao)}
+                        variant={statusBadgeVariant(
+                          d.status as StatusManutencao,
+                        )}
                       >
                         {STATUS_MANUTENCAO_LABEL[d.status as StatusManutencao]}
                       </Badge>

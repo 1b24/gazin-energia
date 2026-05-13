@@ -42,6 +42,41 @@ const fmtBRL = (n: number | null | undefined) =>
         currency: "BRL",
       });
 
+function FileLink({ url }: { url: string | null | undefined }) {
+  if (!url) return <span className="text-muted-foreground">—</span>;
+  const isLink =
+    url.startsWith("/api/files/") ||
+    url.startsWith("/uploads/") ||
+    /^https?:\/\//.test(url);
+  const filename = url.split("/").pop() ?? url;
+  const display = filename.length > 28 ? `${filename.slice(0, 26)}…` : filename;
+
+  if (!isLink) {
+    return (
+      <span
+        className="text-xs text-muted-foreground"
+        title={`${url} — arquivo legado não importado`}
+      >
+        {display}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+      title={filename}
+    >
+      <Paperclip className="h-3 w-3" />
+      {display}
+    </a>
+  );
+}
+
 const columns: ColumnDef<VendaKwhRow, unknown>[] = [
   {
     id: "usina",
@@ -81,46 +116,25 @@ const columns: ColumnDef<VendaKwhRow, unknown>[] = [
   },
   {
     id: "precoMedio",
+    accessorFn: (row) =>
+      row.valorReais != null && row.kwhVendidos != null && row.kwhVendidos !== 0
+        ? row.valorReais / row.kwhVendidos
+        : null,
     header: "R$/kWh",
     cell: ({ row }) => {
       const v = row.original.valorReais;
       const k = row.original.kwhVendidos;
       if (v == null || k == null || k === 0) return "—";
-      return fmtBRL(v / k).replace("R$", "R$ ").replace("R$  ", "R$ ");
+      return fmtBRL(v / k)
+        .replace("R$", "R$ ")
+        .replace("R$  ", "R$ ");
     },
   },
   {
     accessorKey: "notaFiscalUrl",
     header: "NF",
     enableSorting: false,
-    cell: ({ row }) => {
-      const url = row.original.notaFiscalUrl;
-      if (!url) return "—";
-      const isUploaded = (url.startsWith("/api/files/") || url.startsWith("/uploads/"));
-      const filename = url.split("/").pop() ?? url;
-      const display =
-        filename.length > 28 ? `${filename.slice(0, 26)}…` : filename;
-      if (isUploaded) {
-        return (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-            title={filename}
-          >
-            <Paperclip className="h-3 w-3" />
-            {display}
-          </a>
-        );
-      }
-      return (
-        <span className="text-xs text-muted-foreground" title={url}>
-          {display}
-        </span>
-      );
-    },
+    cell: ({ row }) => <FileLink url={row.original.notaFiscalUrl} />,
   },
 ];
 
@@ -133,10 +147,7 @@ function renderDetails(v: VendaKwhRow) {
     <dl>
       <DetailField label="Usina" value={v.usina?.nome ?? v.nomeUsinaRaw} />
       <DetailField label="Ano" value={v.ano} />
-      <DetailField
-        label="Mês"
-        value={MES_LABEL[v.mes] ?? v.mes}
-      />
+      <DetailField label="Mês" value={MES_LABEL[v.mes] ?? v.mes} />
       <DetailField
         label="KWh vendidos"
         value={v.kwhVendidos != null ? `${fmtKwh(v.kwhVendidos)} kWh` : null}
@@ -148,23 +159,7 @@ function renderDetails(v: VendaKwhRow) {
       />
       <DetailField
         label="Nota fiscal"
-        value={
-          v.notaFiscalUrl ? (
-            v.notaFiscalUrl.startsWith("/uploads/") ? (
-              <a
-                href={v.notaFiscalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-primary hover:underline"
-              >
-                <Paperclip className="h-3.5 w-3.5" />
-                {v.notaFiscalUrl.split("/").pop()}
-              </a>
-            ) : (
-              v.notaFiscalUrl
-            )
-          ) : null
-        }
+        value={v.notaFiscalUrl ? <FileLink url={v.notaFiscalUrl} /> : null}
       />
     </dl>
   );
