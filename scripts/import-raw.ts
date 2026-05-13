@@ -282,14 +282,25 @@ async function syncSoftDeletes(
   const delegate = getDelegate(prisma, model);
   if (!delegate || ids.length === 0) return;
 
-  const existing = await delegate.findMany({
-    where: { zohoId: { in: ids } },
+  // Carrega TODOS os registros com zohoId — precisamos saber também os que
+  // SUMIRAM do JSON pra checar se foram editados manualmente antes de
+  // soft-deletar. (Antes carregava só os que estão no JSON; resultado: o
+  // soft-delete não respeitava edição manual em registros que o Zoho
+  // removeu — pendência alta do relatório Codex.)
+  const allWithZohoId = await delegate.findMany({
+    where: { zohoId: { not: null } },
     select: { id: true, zohoId: true, deletedAt: true },
   });
-  const manualChanges = await buildManualChangeMap(prisma, model, existing);
+  const manualChanges = await buildManualChangeMap(
+    prisma,
+    model,
+    allWithZohoId,
+  );
   const preservedZohoIds = new Set(manualChanges.keys());
-  const eligibleRestoreIds = ids.filter((id) => !preservedZohoIds.has(id));
 
+  // Restaurar: zohoIds presentes no JSON, não preservados, atualmente
+  // soft-deletados. Preservar bloqueia tanto restaurar quanto soft-deletar.
+  const eligibleRestoreIds = ids.filter((id) => !preservedZohoIds.has(id));
   const restored = await delegate.updateMany({
     where: {
       zohoId: { in: eligibleRestoreIds },
@@ -297,13 +308,28 @@ async function syncSoftDeletes(
     },
     data: { deletedAt: null },
   });
-  const softDeleted = await delegate.updateMany({
-    where: {
-      AND: [{ zohoId: { not: null } }, { zohoId: { notIn: ids } }],
-      deletedAt: null,
-    },
-    data: { deletedAt: new Date() },
-  });
+
+  // Soft-delete: zohoId no DB mas ausente no JSON novo E não-preservado E
+  // atualmente ativo. Filtrando em JS porque o Prisma não aceita `notIn` +
+  // exclusão de outra lista no mesmo where de forma limpa.
+  const idsInJson = new Set(ids);
+  const softDeleteIds = allWithZohoId
+    .filter(
+      (r) =>
+        r.zohoId != null &&
+        !idsInJson.has(r.zohoId) &&
+        !r.deletedAt &&
+        !preservedZohoIds.has(r.zohoId),
+    )
+    .map((r) => r.zohoId as string);
+
+  const softDeleted =
+    softDeleteIds.length > 0
+      ? await delegate.updateMany({
+          where: { zohoId: { in: softDeleteIds } },
+          data: { deletedAt: new Date() },
+        })
+      : { count: 0 };
 
   const st = track(model);
   st.preserved = (st.preserved ?? 0) + preservedZohoIds.size;
