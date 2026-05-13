@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 import { serializePrisma } from "@/lib/serialize";
 import { prevPeriod, variacao } from "@/lib/variacao";
 
@@ -9,18 +9,26 @@ export default async function ConsumoPage() {
   const session = await auth();
   const db = scopedPrisma(session?.user);
 
+  // Cada query é envolvida em retry — PGLite às vezes recicla a socket entre
+  // requisições do dev server e devolve "Server has closed the connection".
   const [rows, filialOptions] = await Promise.all([
-    db.consumo.findMany({
-      include: {
-        filial: { select: { id: true, codigo: true, mercadoLivre: true } },
-      },
-      orderBy: [{ ano: "desc" }, { mes: "desc" }, { filialId: "asc" }],
-    }),
-    db.filial.findMany({
-      where: { deletedAt: null },
-      select: { id: true, codigo: true, mercadoLivre: true },
-      orderBy: { codigo: "asc" },
-    }),
+    retryClosedConnection(() =>
+      db.consumo.findMany({
+        include: {
+          filial: {
+            select: { id: true, codigo: true, mercadoLivre: true, uf: true },
+          },
+        },
+        orderBy: [{ ano: "desc" }, { mes: "desc" }, { filialId: "asc" }],
+      }),
+    ),
+    retryClosedConnection(() =>
+      db.filial.findMany({
+        where: { deletedAt: null },
+        select: { id: true, codigo: true, mercadoLivre: true },
+        orderBy: { codigo: "asc" },
+      }),
+    ),
   ]);
 
   // Indexa por (uc, ano, mes) pra calcular Δ vs mês anterior da MESMA UC.

@@ -120,10 +120,10 @@ export function buildConsumoFormFields(
     { name: "injecaoRecebida", label: "Injeção recebida (kWh)", type: "currency", span: 1, placeholder: "0,00" },
 
     // Valores (R$)
-    { name: "valor", label: "Valor (R$)", type: "currency", span: 1, placeholder: "0,00" },
-    { name: "valor1", label: "Valor 1 (R$)", type: "currency", span: 1, placeholder: "0,00" },
-    { name: "valor2", label: "Valor 2 (R$)", type: "currency", span: 1, placeholder: "0,00" },
-    { name: "valor3", label: "Valor 3 (R$)", type: "currency", span: 1, placeholder: "0,00" },
+    { name: "valor", label: "Valor P (R$)", type: "currency", span: 1, placeholder: "0,00" },
+    { name: "valor1", label: "Valor FP (R$)", type: "currency", span: 1, placeholder: "0,00" },
+    { name: "valor2", label: "Valor consumo total (R$)", type: "currency", span: 1, placeholder: "0,00" },
+    { name: "valor3", label: "Valor injeção recebida (R$)", type: "currency", span: 1, placeholder: "0,00" },
     {
       name: "valorTotalFatura",
       label: "Valor total da fatura (R$)",
