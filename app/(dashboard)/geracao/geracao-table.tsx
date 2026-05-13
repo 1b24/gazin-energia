@@ -12,7 +12,7 @@ import type { Geracao, GeracaoDia, Usina } from "@prisma/client";
 import {
   AlertTriangle,
   BarChart3,
-  BatteryCharging,
+  PiggyBank,
   Gauge,
   Pencil,
   Save,
@@ -36,9 +36,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
-import { fmtCompact, fmtPct } from "@/lib/format";
+import { fmtBRL, fmtCompact, fmtPct } from "@/lib/format";
 import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
 import { mesIndex, periodKey, periodoLabel } from "@/lib/period";
+import {
+  calcValorDistribuidora,
+  findTarifaPorData,
+  refDateFromAnoMes,
+  type TarifaSnapshot,
+} from "@/lib/tarifa-lookup";
 import {
   buildGeracaoFormFields,
   geracaoSchema,
@@ -125,7 +131,22 @@ function metaBarClass(value: number | null | undefined) {
 
 // EmptyAnalytics movido para `components/analytics/empty-state.tsx` (Step 5).
 
-function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
+/** Tarifa serializada vinda da page (Date como string ISO). */
+export interface TarifaDistribuidoraSerialized {
+  uf: string;
+  valorPonta: number | null;
+  valorForaPonta: number | null;
+  vigenciaInicio: string;
+  vigenciaFim: string | null;
+}
+
+function GeracaoAnalytics({
+  rows,
+  tarifasDistribuidoras,
+}: {
+  rows: GeracaoRow[];
+  tarifasDistribuidoras: TarifaDistribuidoraSerialized[];
+}) {
   // Filtros multi-select (período + UF) com filtragem AND. UF vem de
   // `usina.uf`. Hook em `lib/hooks/use-analytics-filters.ts`.
   const {
@@ -141,11 +162,58 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
     uf: (row) => row.usina?.uf?.trim() || null,
   });
 
+  const tarifas = useMemo<TarifaSnapshot[]>(
+    () =>
+      tarifasDistribuidoras.map((t) => ({
+        uf: t.uf,
+        valorPonta: t.valorPonta,
+        valorForaPonta: t.valorForaPonta,
+        vigenciaInicio: new Date(t.vigenciaInicio),
+        vigenciaFim: t.vigenciaFim ? new Date(t.vigenciaFim) : null,
+      })),
+    [tarifasDistribuidoras],
+  );
+
   const data = useMemo(() => {
     const totalRealizado = selectedRows.reduce(
       (acc, row) => acc + totalKwh(row.dias),
       0,
     );
+
+    // Receita evitada — kWh gerado × tarifa de distribuidora vigente na
+    // data do registro. Não há split Ponta/FP no Geracao (só total diário),
+    // então tratamos tudo como Fora Ponta (conservador: maioria das horas
+    // de geração solar cai fora do horário de ponta).
+    let receitaEvitadaTotal = 0;
+    let rowsComTarifa = 0;
+    let rowsSemTarifa = 0;
+    const receitaPorUsina = new Map<string, number>();
+    for (const row of selectedRows) {
+      const uf = row.usina?.uf?.trim() || null;
+      const refDate = refDateFromAnoMes(row.ano, row.mes);
+      if (!uf || !refDate) {
+        rowsSemTarifa += 1;
+        continue;
+      }
+      const tarifa = findTarifaPorData(tarifas, uf, refDate);
+      if (!tarifa) {
+        rowsSemTarifa += 1;
+        continue;
+      }
+      const kwhGerado = totalKwh(row.dias);
+      const receita = calcValorDistribuidora(0, kwhGerado, tarifa);
+      if (receita == null) {
+        rowsSemTarifa += 1;
+        continue;
+      }
+      receitaEvitadaTotal += receita;
+      rowsComTarifa += 1;
+      const label = usinaLabel(row);
+      receitaPorUsina.set(
+        label,
+        (receitaPorUsina.get(label) ?? 0) + receita,
+      );
+    }
     const totalEstimado = selectedRows.reduce(
       (acc, row) => acc + estimativaMensal(row),
       0,
@@ -223,6 +291,7 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
         ...item,
         diferenca: item.estimado - item.meta,
         pctMeta: item.meta > 0 ? (item.realizado / item.meta) * 100 : null,
+        receitaEvitada: receitaPorUsina.get(item.label) ?? null,
       }))
       .sort((a, b) => b.realizado - a.realizado);
 
@@ -240,11 +309,14 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
       pctMeta: totalMeta > 0 ? (totalEstimado / totalMeta) * 100 : null,
       usinasCount: usinas.size,
       diasInformados,
+      receitaEvitadaTotal,
+      rowsComTarifa,
+      rowsSemTarifa,
       usinasOrdenadas,
       abaixoMeta,
       periodosRank,
     };
-  }, [selectedRows]);
+  }, [selectedRows, tarifas]);
 
   if (rows.length === 0)
     return <EmptyAnalytics message="Sem dados de geração para analisar." />;
@@ -307,10 +379,22 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
           icon={<Target className="h-4 w-4" />}
         />
         <MetricCard
-          title="Economia energética"
-          value={`${fmtCompact(data.totalEstimado)} kWh`}
-          description="projeção de energia a compensar; sem conversão R$"
-          icon={<BatteryCharging className="h-4 w-4" />}
+          title="Receita evitada"
+          value={
+            data.rowsComTarifa === 0 ? (
+              <span className="text-muted-foreground">—</span>
+            ) : (
+              <span className="text-emerald-600">
+                {fmtBRL(data.receitaEvitadaTotal)}
+              </span>
+            )
+          }
+          description={
+            data.rowsComTarifa === 0
+              ? "Cadastre tarifa de distribuidora em /tarifas pra estimar"
+              : `${fmtCompact(data.totalRealizado)} kWh × tarifa cativo · ${data.rowsComTarifa} mês(es) comparados`
+          }
+          icon={<PiggyBank className="h-4 w-4" />}
         />
       </div>
 
@@ -340,6 +424,11 @@ function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
                     <div className="text-muted-foreground">
                       {fmtPct(item.pctMeta)} da meta climática
                     </div>
+                    {item.receitaEvitada != null && (
+                      <div className="text-[11px] text-emerald-600">
+                        Evitou {fmtBRL(item.receitaEvitada)}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <Bar
@@ -722,15 +811,23 @@ function Stat({ label, value }: { label: string; value: string }) {
 interface Props {
   rows: GeracaoRow[];
   usinaOptions: UsinaOption[];
+  tarifasDistribuidoras: TarifaDistribuidoraSerialized[];
 }
 
-export function GeracaoTable({ rows, usinaOptions }: Props) {
+export function GeracaoTable({
+  rows,
+  usinaOptions,
+  tarifasDistribuidoras,
+}: Props) {
   const fields = buildGeracaoFormFields(usinaOptions);
   const activeRows = useMemo(() => rows.filter((row) => !row.deletedAt), [rows]);
 
   return (
     <div className="flex flex-col gap-4">
-      <GeracaoAnalytics rows={activeRows} />
+      <GeracaoAnalytics
+        rows={activeRows}
+        tarifasDistribuidoras={tarifasDistribuidoras}
+      />
       <EntityPage<GeracaoRow, typeof geracaoSchema>
         title="Geração"
         prismaModel="Geracao"

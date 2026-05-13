@@ -19,6 +19,25 @@ export default async function InjecaoPage() {
       orderBy: [{ ano: "desc" }, { mes: "desc" }],
     }),
   );
+
+  // Tarifas históricas de distribuidoras — usadas no analytics pra calcular
+  // economia vs distribuidora por UF / período de cada injeção.
+  const tarifasDistribuidoras = await retryClosedConnection(() =>
+    db.tarifaEnergia.findMany({
+      where: {
+        origem: "distribuidora",
+        deletedAt: null,
+        distribuidoraId: { not: null },
+      },
+      select: {
+        valorPonta: true,
+        valorForaPonta: true,
+        vigenciaInicio: true,
+        vigenciaFim: true,
+        distribuidora: { select: { uf: true } },
+      },
+    }),
+  );
   const filialOptions = await retryClosedConnection(() =>
     db.filial.findMany({
       where: { deletedAt: null },
@@ -41,11 +60,34 @@ export default async function InjecaoPage() {
     }),
   );
 
+  // Achatar tarifas pra formato consumível pelo cliente — extrai UF da
+  // relação distribuidora e serializa Decimal→number. Dates vão como
+  // string ISO (mais previsível ao atravessar RSC→Client; client converte
+  // via `new Date()`).
+  const tarifasFlat = (
+    serializePrisma(tarifasDistribuidoras) as Array<{
+      valorPonta: number | null;
+      valorForaPonta: number | null;
+      vigenciaInicio: Date;
+      vigenciaFim: Date | null;
+      distribuidora: { uf: string | null } | null;
+    }>
+  )
+    .filter((t) => t.distribuidora?.uf)
+    .map((t) => ({
+      uf: t.distribuidora!.uf as string,
+      valorPonta: t.valorPonta,
+      valorForaPonta: t.valorForaPonta,
+      vigenciaInicio: t.vigenciaInicio.toISOString(),
+      vigenciaFim: t.vigenciaFim ? t.vigenciaFim.toISOString() : null,
+    }));
+
   return (
     <InjecaoTable
       rows={serializePrisma(rows) as InjecaoRow[]}
       filialOptions={filialOptions}
       fornecedorOptions={fornecedorOptions}
+      tarifasDistribuidoras={tarifasFlat}
     />
   );
 }

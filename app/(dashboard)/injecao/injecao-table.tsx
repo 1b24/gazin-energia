@@ -9,6 +9,7 @@ import {
   Building2,
   DatabaseZap,
   Paperclip,
+  PiggyBank,
   PlugZap,
 } from "lucide-react";
 import { useMemo } from "react";
@@ -30,6 +31,12 @@ import {
 } from "@/lib/format";
 import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
 import { mesIndex } from "@/lib/period";
+import {
+  calcValorDistribuidora,
+  findTarifaPorData,
+  refDateFromAnoMes,
+  type TarifaSnapshot,
+} from "@/lib/tarifa-lookup";
 import {
   buildInjecaoFormFields,
   injecaoSchema,
@@ -109,7 +116,22 @@ function FileLink({ url }: { url: string | null | undefined }) {
 // `overflow-wrap:anywhere` em vez de `text-2xl` + `truncate` — valores longos
 // quebram linha em vez de serem cortados.
 
-function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
+/** Tarifa serializada vinda da page (Date como string ISO). */
+export interface TarifaDistribuidoraSerialized {
+  uf: string;
+  valorPonta: number | null;
+  valorForaPonta: number | null;
+  vigenciaInicio: string;
+  vigenciaFim: string | null;
+}
+
+function InjecaoAnalytics({
+  rows,
+  tarifasDistribuidoras,
+}: {
+  rows: InjecaoRow[];
+  tarifasDistribuidoras: TarifaDistribuidoraSerialized[];
+}) {
   // Filtros multi-select (período + UF) com filtragem AND. UF vem de
   // `filial.uf`. Hook em `lib/hooks/use-analytics-filters.ts`.
   const {
@@ -125,6 +147,19 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
     uf: (row) => row.filial?.uf?.trim() || null,
   });
 
+  // Tarifas com Date reidratada — string ISO → Date uma vez só.
+  const tarifas = useMemo<TarifaSnapshot[]>(
+    () =>
+      tarifasDistribuidoras.map((t) => ({
+        uf: t.uf,
+        valorPonta: t.valorPonta,
+        valorForaPonta: t.valorForaPonta,
+        vigenciaInicio: new Date(t.vigenciaInicio),
+        vigenciaFim: t.vigenciaFim ? new Date(t.vigenciaFim) : null,
+      })),
+    [tarifasDistribuidoras],
+  );
+
   const data = useMemo(() => {
     const totalKwh = scopedRows.reduce((acc, row) => acc + rowKwh(row), 0);
     const totalValor = scopedRows.reduce((acc, row) => acc + rowValor(row), 0);
@@ -139,6 +174,42 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
     const ucs = new Set(
       scopedRows.map((row) => row.uc?.trim()).filter(Boolean),
     );
+
+    // Economia vs distribuidora — calcula linha por linha usando tarifa
+    // histórica que cobria a data do registro.
+    let economiaTotal = 0;
+    let rowsComTarifa = 0;
+    let rowsSemTarifa = 0;
+    const economiaPorFornecedor = new Map<string, number>();
+    for (const row of scopedRows) {
+      const uf = row.filial?.uf?.trim() || null;
+      const refDate = refDateFromAnoMes(row.ano, row.mes);
+      if (!uf || !refDate) {
+        rowsSemTarifa += 1;
+        continue;
+      }
+      const tarifa = findTarifaPorData(tarifas, uf, refDate);
+      if (!tarifa) {
+        rowsSemTarifa += 1;
+        continue;
+      }
+      const kwhPonta = row.consumoKwhP ?? 0;
+      const kwhTotal = row.consumoTotalKwh ?? 0;
+      const kwhForaPonta = Math.max(0, kwhTotal - kwhPonta);
+      const valorDist = calcValorDistribuidora(kwhPonta, kwhForaPonta, tarifa);
+      if (valorDist == null) {
+        rowsSemTarifa += 1;
+        continue;
+      }
+      const economia = valorDist - rowValor(row);
+      economiaTotal += economia;
+      rowsComTarifa += 1;
+      const fornecedorKey = fornecedorLabel(row);
+      economiaPorFornecedor.set(
+        fornecedorKey,
+        (economiaPorFornecedor.get(fornecedorKey) ?? 0) + economia,
+      );
+    }
 
     const fornecedores = new Map<
       string,
@@ -192,6 +263,7 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
         ...item,
         ucsCount: item.ucs.size,
         valorPorKwh: item.kwh > 0 ? item.valor / item.kwh : null,
+        economia: economiaPorFornecedor.get(item.label) ?? null,
       }))
       .sort((a, b) => b.kwh - a.kwh);
 
@@ -225,6 +297,9 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
       totalValor1,
       totalValor2,
       ucsCount: ucs.size,
+      economiaTotal,
+      rowsComTarifa,
+      rowsSemTarifa,
       fornecedoresRank,
       periodosRank,
       topKwh,
@@ -238,7 +313,7 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
         { label: "Valor zerado", value: valorZerado },
       ],
     };
-  }, [scopedRows]);
+  }, [scopedRows, tarifas]);
 
   if (rows.length === 0)
     return <EmptyAnalytics message="Sem dados de injeção para analisar." />;
@@ -288,7 +363,7 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           title="Injeção total"
           value={`${fmtCompact(data.totalKwh)} kWh`}
@@ -300,6 +375,28 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
           value={fmtBRL(data.totalValor)}
           description={`Valor 1: ${fmtBRL(data.totalValor1)} · Valor 2: ${fmtBRL(data.totalValor2)}`}
           icon={<Banknote className="h-4 w-4" />}
+        />
+        <MetricCard
+          title="Economia vs distribuidora"
+          value={
+            data.rowsComTarifa === 0 ? (
+              <span className="text-muted-foreground">—</span>
+            ) : (
+              <span
+                className={
+                  data.economiaTotal >= 0 ? "text-emerald-600" : "text-destructive"
+                }
+              >
+                {fmtBRL(data.economiaTotal)}
+              </span>
+            )
+          }
+          description={
+            data.rowsComTarifa === 0
+              ? "Cadastre tarifa de distribuidora em /tarifas pra comparar"
+              : `${data.rowsComTarifa} comparáveis · ${data.rowsSemTarifa} sem tarifa cobrindo a data`
+          }
+          icon={<PiggyBank className="h-4 w-4" />}
         />
         <MetricCard
           title="Fornecedor líder"
@@ -346,6 +443,17 @@ function InjecaoAnalytics({ rows }: { rows: InjecaoRow[] }) {
                     <div className="text-muted-foreground">
                       {fmtBRL(item.valor)} · {fmtRate(item.valorPorKwh)}
                     </div>
+                    {item.economia != null && (
+                      <div
+                        className={`text-[11px] ${
+                          item.economia >= 0
+                            ? "text-emerald-600"
+                            : "text-destructive"
+                        }`}
+                      >
+                        Economia: {fmtBRL(item.economia)}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <Bar value={item.kwh} max={maxFornecedorKwh} />
@@ -630,19 +738,24 @@ interface Props {
   rows: InjecaoRow[];
   filialOptions: FilialPickerOption[];
   fornecedorOptions: FornecedorPickerOption[];
+  tarifasDistribuidoras: TarifaDistribuidoraSerialized[];
 }
 
 export function InjecaoTable({
   rows,
   filialOptions,
   fornecedorOptions,
+  tarifasDistribuidoras,
 }: Props) {
   const fields = buildInjecaoFormFields(filialOptions, fornecedorOptions);
   const activeRows = useMemo(() => rows.filter((row) => !row.deletedAt), [rows]);
 
   return (
     <div className="flex flex-col gap-4">
-      <InjecaoAnalytics rows={activeRows} />
+      <InjecaoAnalytics
+        rows={activeRows}
+        tarifasDistribuidoras={tarifasDistribuidoras}
+      />
       <EntityPage<InjecaoRow, typeof injecaoSchema>
         title="Controle de Injeção"
         prismaModel="Injecao"
