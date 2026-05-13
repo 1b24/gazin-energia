@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { SkippedSection } from "@/components/analytics/skipped-section";
 import { fmtBRL, fmtCompact, fmtPct } from "@/lib/format";
 import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
 import { mesIndex, periodKey, periodoLabel } from "@/lib/period";
@@ -573,59 +574,15 @@ function GeracaoAnalytics({
       </Card>
 
       {data.skipped.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>
-                Registros sem comparação ({data.skipped.length})
-              </CardTitle>
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Não entraram no cálculo de receita evitada. Resumo por motivo
-              abaixo, seguido dos primeiros 20 detalhes.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(
-                data.skipped.reduce<Record<SkipReason, number>>(
-                  (acc, s) => {
-                    acc[s.reason] = (acc[s.reason] ?? 0) + 1;
-                    return acc;
-                  },
-                  {} as Record<SkipReason, number>,
-                ),
-              ).map(([reason, count]) => (
-                <Badge key={reason} variant="outline">
-                  {SKIP_REASON_LABEL[reason as SkipReason]}: {count}
-                </Badge>
-              ))}
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              {data.skipped.slice(0, 20).map((s) => (
-                <div
-                  key={s.rowId}
-                  className="flex items-start justify-between gap-3 border-b border-dashed pb-1.5"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{s.label}</div>
-                    <div className="text-muted-foreground">{s.detail}</div>
-                  </div>
-                  <Badge variant="outline" className="shrink-0 text-[10px]">
-                    {SKIP_REASON_LABEL[s.reason]}
-                  </Badge>
-                </div>
-              ))}
-              {data.skipped.length > 20 && (
-                <p className="pt-2 text-muted-foreground">
-                  ... e mais {data.skipped.length - 20} registro(s).
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <SkippedSection
+          skipped={data.skipped.map((s) => ({
+            rowId: s.rowId,
+            label: s.label,
+            reasonLabel: SKIP_REASON_LABEL[s.reason],
+            detail: s.detail,
+          }))}
+          contextLabel="cálculo de receita evitada"
+        />
       )}
     </section>
   );
