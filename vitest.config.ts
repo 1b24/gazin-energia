@@ -10,7 +10,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "components/**/*.test.ts"],
     // Garante que `lib/generated/prisma` (output do Prisma generate) não entra
     // no scan se algum dia houver `.test.ts` lá por engano.
     exclude: ["lib/generated/**", "node_modules/**"],

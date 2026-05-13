@@ -73,6 +73,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { getOriginalColumnValue } from "./column-helpers";
+
 const NO_COLUMN_VALUES_SELECTED = "__data_table_no_column_values_selected__";
 
 /**
@@ -231,41 +233,9 @@ type DataColumnWithAccessor<T> = ColumnDef<T, unknown> & {
   id?: string;
 };
 
-function getOriginalColumnValue<T>(row: T, columnId: string): unknown {
-  if (!row || typeof row !== "object") return null;
-
-  const record = row as Record<string, unknown>;
-  if (columnId in record && record[columnId] != null) {
-    return record[columnId];
-  }
-
-  if (columnId === "filial") {
-    const filial = record.filial as Record<string, unknown> | null | undefined;
-    return filial?.codigo ?? filial?.nome ?? record.filialCodigoRaw ?? null;
-  }
-  if (columnId === "fornecedor") {
-    const fornecedor = record.fornecedor as
-      | Record<string, unknown>
-      | null
-      | undefined;
-    return fornecedor?.nome ?? record.fornecedorRaw ?? null;
-  }
-  if (columnId === "abrangenciaFilial") {
-    const filial = record.abrangenciaFilial as
-      | Record<string, unknown>
-      | null
-      | undefined;
-    return (
-      filial?.codigo ?? filial?.nome ?? record.abrangenciaFilialRaw ?? null
-    );
-  }
-  if (columnId === "usina") {
-    const usina = record.usina as Record<string, unknown> | null | undefined;
-    return usina?.nome ?? record.nomeUsinaRaw ?? null;
-  }
-
-  return null;
-}
+// `getOriginalColumnValue` mora em ./column-helpers — extraído pra ser
+// testável em Vitest (data-table.tsx é "use client" e o teste node-env
+// não consegue importar).
 
 function ensureColumnFilterAccessor<T>(
   column: ColumnDef<T, unknown>,

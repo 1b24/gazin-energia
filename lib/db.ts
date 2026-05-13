@@ -148,14 +148,19 @@ export function applyCreateScope(
 
 // ----------------------------------------------------------------------------
 // Retry transiente para PGLite — "Server has closed the connection" e
-// "Connection terminated unexpectedly" aparecem quando a socket do PGLite
-// expira/recicla entre requisições do dev server. Não é falha real do banco;
-// uma segunda tentativa imediata costuma passar.
+// "Connection terminated unexpectedly" aparecem quando uma socket do PGLite
+// expira/recicla entre requisições do dev server. Não é falha real do banco.
+//
+// Estratégia: até 3 tentativas com backoff curto entre elas. O pool do
+// Prisma costuma ter várias sockets — se a primeira está morta, a segunda
+// pode estar também (mesmo idle timeout). O delay dá tempo do pool fazer
+// health check e descartar sockets mortas antes da próxima tentativa.
 // ----------------------------------------------------------------------------
 
 const TRANSIENT_CONNECTION_ERRORS = [
   "Server has closed the connection",
   "Connection terminated unexpectedly",
+  "Connection terminated",
 ];
 
 function isTransientConnectionError(err: unknown): boolean {
@@ -163,21 +168,51 @@ function isTransientConnectionError(err: unknown): boolean {
   return TRANSIENT_CONNECTION_ERRORS.some((m) => err.message.includes(m));
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
- * Executa `operation()` com retry único quando o erro for transiente de
- * conexão. Se falhar de novo, propaga o erro original.
+ * Executa `operation()` com até 3 retries em caso de erro transiente de
+ * conexão. Estratégia escalonada:
+ *   - Tentativa 1: direta.
+ *   - Tentativa 2 (após 100ms): direta — pool pode descartar socket morta.
+ *   - Tentativa 3 (após 300ms): direta — última chance "barata".
+ *   - Tentativa 4 (após 500ms): força `$disconnect()` ANTES — força o pool
+ *     a abrir conexões novas do zero. Use apenas como último recurso porque
+ *     `$disconnect` afeta o singleton (pode cortar requests concorrentes em
+ *     outras rotas se rodando em paralelo). Em dev / situação degradada o
+ *     trade-off vale: ou todas as queries falham, ou recuperamos.
  *
- * Use em queries lidas por páginas/server actions que falham com 500 quando
- * o PGLite recicla a socket. Mutations em transação NÃO devem ser envolvidas
- * aqui — re-executar pode duplicar audit/efeitos colaterais.
+ * Use em queries de LEITURA chamadas por páginas/server actions. Mutations
+ * em transação NÃO devem ser envolvidas — re-executar pode duplicar audit
+ * e efeitos colaterais.
  */
 export async function retryClosedConnection<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
-  try {
-    return await operation();
-  } catch (err) {
-    if (isTransientConnectionError(err)) return operation();
-    throw err;
+  // Tentativas "baratas" — sem mexer no pool global.
+  const cheapDelays = [0, 100, 300];
+  for (const delay of cheapDelays) {
+    if (delay > 0) await sleep(delay);
+    try {
+      return await operation();
+    } catch (err) {
+      if (!isTransientConnectionError(err)) throw err;
+      // Erro transiente — continua pra próxima tentativa.
+    }
   }
+
+  // Última cartada — força reset do pool. Disconnect explícito + delay
+  // para o cliente reconectar do zero na próxima operação.
+  // Nota: se o problema é o SERVIDOR PGLite estar zumbi (porta aberta mas
+  // não respondendo), nem o reset do pool resolve — precisa reiniciar o
+  // PGLite. Esse caminho protege contra "pool com sockets mortas".
+  try {
+    await prisma.$disconnect();
+  } catch {
+    // ignora — se o disconnect falhou, a próxima operação reconecta sozinha.
+  }
+  await sleep(500);
+  return operation();
 }
