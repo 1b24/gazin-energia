@@ -12,6 +12,9 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { readFileFor } from "@/lib/storage";
 
+// SVG / HTML / JS NÃO ESTÃO AQUI — servidos como octet-stream + attachment.
+// Razão: <script> inline em SVG executa na origem do app (XSS, roubo de sessão).
+// Veja `lib/actions/upload.ts` para a allowlist do upload.
 const MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
   png: "image/png",
@@ -19,15 +22,31 @@ const MIME_BY_EXT: Record<string, string> = {
   jpeg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
-  svg: "image/svg+xml",
   csv: "text/csv",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   json: "application/json",
 };
 
+/**
+ * Extensões servidas INLINE — só formatos que não executam código no browser.
+ * Qualquer coisa fora desta lista vai como `attachment` (força download).
+ */
+const INLINE_EXTENSIONS = new Set([
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+]);
+
+function extOf(name: string): string {
+  return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
 function mimeOf(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase();
-  return (ext && MIME_BY_EXT[ext]) || "application/octet-stream";
+  const ext = extOf(name);
+  return MIME_BY_EXT[ext] || "application/octet-stream";
 }
 
 export const runtime = "nodejs";
@@ -59,10 +78,22 @@ export async function GET(
 
   if (result.kind === "buffer" && result.buffer) {
     const filename = result.filename ?? key;
+    const ext = extOf(filename);
+    const inline = INLINE_EXTENSIONS.has(ext);
+    // Filename é seguro? Só ascii imprimível, sem aspas/quebras. Caso contrário,
+    // usa fallback genérico — evita header-injection via Content-Disposition.
+    const safeName = /^[\w.\-]+$/.test(filename) ? filename : `arquivo.${ext || "bin"}`;
+    const disposition = inline
+      ? `inline; filename="${safeName}"`
+      : `attachment; filename="${safeName}"`;
     return new NextResponse(new Uint8Array(result.buffer), {
       headers: {
         "Content-Type": mimeOf(filename),
         "Content-Length": String(result.size ?? result.buffer.length),
+        "Content-Disposition": disposition,
+        // Bloqueia mime-sniffing: o browser respeita o Content-Type acima
+        // (octet-stream pra extensões não-inline) e não tenta "adivinhar".
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=60",
       },
     });

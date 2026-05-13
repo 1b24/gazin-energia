@@ -64,8 +64,19 @@ export function formatCNPJ(s: string): string {
 // ----------------------------------------------------------------------------
 
 const BR_MONTHS: Record<string, number> = {
-  janeiro: 1, fevereiro: 2, março: 3, marco: 3, abril: 4, maio: 5, junho: 6,
-  julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+  janeiro: 1,
+  fevereiro: 2,
+  março: 3,
+  marco: 3,
+  abril: 4,
+  maio: 5,
+  junho: 6,
+  julho: 7,
+  agosto: 8,
+  setembro: 9,
+  outubro: 10,
+  novembro: 11,
+  dezembro: 12,
 };
 
 /** Returns 1..12 for a Portuguese month name (case/accent insensitive), or null. */
@@ -77,8 +88,18 @@ export function mesPtToNumber(s: string | null | undefined): number | null {
 
 /** Maps a 3-letter Portuguese month abbreviation (JAN..DEZ) to 1..12. */
 const PT_MONTH_ABBR: Record<string, number> = {
-  JAN: 1, FEV: 2, MAR: 3, ABR: 4, MAI: 5, JUN: 6,
-  JUL: 7, AGO: 8, SET: 9, OUT: 10, NOV: 11, DEZ: 12,
+  JAN: 1,
+  FEV: 2,
+  MAR: 3,
+  ABR: 4,
+  MAI: 5,
+  JUN: 6,
+  JUL: 7,
+  AGO: 8,
+  SET: 9,
+  OUT: 10,
+  NOV: 11,
+  DEZ: 12,
 };
 
 export function mesAbbrPtToNumber(s: string): number | null {
@@ -149,6 +170,9 @@ export function parseLooseNumber(input: unknown): number | null {
       cleaned = s; // decimal
     } else if (parts.length === 2 && parts[1].length === 4) {
       // Zoho-style "3020687753.0000" — treat the `.0000` suffix as decimal noise
+      cleaned = s;
+    } else if (parts.length === 2 && parts[1].length > 3) {
+      // Zoho/JS float artifacts such as "110.89800000000001".
       cleaned = s;
     } else {
       cleaned = s.replace(/\./g, "");

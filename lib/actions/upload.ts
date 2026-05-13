@@ -26,6 +26,42 @@ const ALLOWED_BUCKETS = new Set([
   "manutencao-preventiva",
 ]);
 
+/**
+ * Extensões aceitas. SVG ESTÁ FORA propositalmente — SVG é um documento XML
+ * que executa <script> quando servido inline, abrindo XSS na origem do app.
+ * O fluxo legítimo é nota fiscal/laudo: PDFs + imagens raster bastam.
+ */
+const ALLOWED_EXTENSIONS = new Set([
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "csv",
+  "xlsx",
+  "xls",
+  "json",
+  "txt",
+]);
+
+/**
+ * MIMEs explicitamente bloqueados — defesa em profundidade caso o browser
+ * envie content-type customizado mas a extensão tenha sido aceita por engano.
+ */
+const BLOCKED_MIMES = new Set([
+  "image/svg+xml",
+  "text/html",
+  "application/xhtml+xml",
+  "application/javascript",
+  "text/javascript",
+]);
+
+function extensionOf(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  return ext ?? "";
+}
+
 export async function uploadFile(formData: FormData): Promise<string> {
   const session = await auth();
   if (!session?.user) {
@@ -45,6 +81,16 @@ export async function uploadFile(formData: FormData): Promise<string> {
     throw new Error(
       `Arquivo muito grande (${(file.size / 1024 / 1024).toFixed(1)} MB). Limite: 25 MB.`,
     );
+  }
+
+  const ext = extensionOf(file.name);
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    throw new Error(
+      `Extensão "${ext || "(sem)"}" não é permitida. Aceitos: ${[...ALLOWED_EXTENSIONS].join(", ")}.`,
+    );
+  }
+  if (file.type && BLOCKED_MIMES.has(file.type.toLowerCase())) {
+    throw new Error(`Tipo "${file.type}" bloqueado por segurança.`);
   }
 
   const saved = await saveFile(file, bucket);

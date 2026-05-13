@@ -44,7 +44,12 @@ import {
 import { exportRows, type ExportFormat } from "@/lib/exports";
 import { isStub } from "@/lib/modules/status";
 
-export type CrudActor = { id: string; role: string; filialId?: string | null } | null;
+export type CrudActor = {
+  id: string;
+  email?: string | null;
+  role: string;
+  filialId?: string | null;
+} | null;
 
 export interface CrudHooks {
   /** Resolve o usuário atual a partir do contexto da request (NextAuth na T5). */
@@ -89,7 +94,10 @@ type AnyDelegate = {
   count: (args?: { where?: unknown }) => Promise<number>;
 };
 
-function delegateFor(prismaModel: string, client: unknown = prisma): AnyDelegate {
+function delegateFor(
+  prismaModel: string,
+  client: unknown = prisma,
+): AnyDelegate {
   const key = prismaModel.charAt(0).toLowerCase() + prismaModel.slice(1);
   // O cliente Prisma 7 expõe os models pelo nome em camelCase. Aceita um
   // tx (interactive transaction) no lugar do client global.
@@ -136,6 +144,7 @@ export function createCrudActions<S extends z.ZodObject>(
     if (!session?.user) return null;
     return {
       id: session.user.id,
+      email: session.user.email,
       role: session.user.role,
       filialId: session.user.filialId,
     };
@@ -164,7 +173,7 @@ export function createCrudActions<S extends z.ZodObject>(
    */
   async function auditInTx(
     tx: unknown,
-    actorId: string,
+    actorVal: NonNullable<CrudActor>,
     action: "create" | "update" | "soft_delete" | "restore" | "hard_delete",
     entityId: string,
     before: unknown,
@@ -172,7 +181,7 @@ export function createCrudActions<S extends z.ZodObject>(
   ) {
     await recordAudit(
       {
-        actor: { id: actorId },
+        actor: { id: actorVal.id, email: actorVal.email },
         entityType: prismaModel,
         entityId,
         action,
@@ -217,7 +226,7 @@ export function createCrudActions<S extends z.ZodObject>(
     const created = await prisma.$transaction(async (tx) => {
       const delegate = delegateFor(prismaModel, tx);
       const c = await delegate.create({ data });
-      await auditInTx(tx, a.id, "create", c.id, null, c);
+      await auditInTx(tx, a, "create", c.id, null, c);
       return c;
     });
     bustCache();
@@ -236,7 +245,7 @@ export function createCrudActions<S extends z.ZodObject>(
       const delegate = delegateFor(prismaModel, tx);
       const before = await delegate.findUnique({ where: { id } });
       const after = await delegate.update({ where: { id }, data });
-      await auditInTx(tx, a.id, "update", id, before, after);
+      await auditInTx(tx, a, "update", id, before, after);
       return { before, after };
     });
     bustCache();
@@ -257,7 +266,7 @@ export function createCrudActions<S extends z.ZodObject>(
         where: { id },
         data: { deletedAt: new Date() },
       });
-      await auditInTx(tx, a.id, "soft_delete", id, before, after);
+      await auditInTx(tx, a, "soft_delete", id, before, after);
       return { before, after };
     });
     bustCache();
@@ -278,7 +287,7 @@ export function createCrudActions<S extends z.ZodObject>(
         where: { id },
         data: { deletedAt: null },
       });
-      await auditInTx(tx, a.id, "restore", id, before, after);
+      await auditInTx(tx, a, "restore", id, before, after);
       return { before, after };
     });
     bustCache();
@@ -304,7 +313,8 @@ export function createCrudActions<S extends z.ZodObject>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = scopedPrisma(a) as any;
     const delegate = db[modelLower()];
-    if (!delegate?.findMany) throw new Error(`Model "${prismaModel}" inacessível.`);
+    if (!delegate?.findMany)
+      throw new Error(`Model "${prismaModel}" inacessível.`);
     const filter =
       ids === "all"
         ? where
@@ -335,9 +345,21 @@ export function createCrudActions<S extends z.ZodObject>(
 // ---------------------------------------------------------------------------
 
 /**
+ * Campos NUNCA exportados — defesa em profundidade. Mesmo padrão usado pelo
+ * audit (lib/audit.ts) para redigir antes de persistir o `before/after`.
+ */
+const SENSITIVE_FIELD_PATTERN =
+  /(^|_)(senha|password|hash|token|secret|accesskey|secretkey|apikey)($|[_A-Z])/i;
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_FIELD_PATTERN.test(key);
+}
+
+/**
  * Constrói um `include` Prisma com todas as relações 1-1/N-1 (não-list) do
- * model — apenas escalares de cada relação, evitando recursão profunda.
- * Lista (1-N/N-N) é deixada de fora pra não inflar o export.
+ * model — apenas escalares de cada relação, evitando recursão profunda e
+ * campos sensíveis (senha/password/token). Lista (1-N/N-N) é deixada de fora
+ * pra não inflar o export.
  */
 function buildScalarInclude(
   modelName: string,
@@ -347,13 +369,13 @@ function buildScalarInclude(
   const include: Record<string, { select: Record<string, true> }> = {};
   for (const f of model.fields) {
     if (f.kind !== "object" || f.isList) continue;
-    const target = Prisma.dmmf.datamodel.models.find(
-      (m) => m.name === f.type,
-    );
+    const target = Prisma.dmmf.datamodel.models.find((m) => m.name === f.type);
     if (!target) continue;
     const select: Record<string, true> = {};
     for (const sf of target.fields) {
-      if (sf.kind === "scalar" || sf.kind === "enum") select[sf.name] = true;
+      if ((sf.kind === "scalar" || sf.kind === "enum") && !isSensitiveKey(sf.name)) {
+        select[sf.name] = true;
+      }
     }
     if (Object.keys(select).length > 0) include[f.name] = { select };
   }
@@ -372,6 +394,7 @@ function flattenRelations(
   return rows.map((r) => {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(r)) {
+      if (isSensitiveKey(k)) continue;
       if (
         v &&
         typeof v === "object" &&
@@ -379,6 +402,7 @@ function flattenRelations(
         !(v instanceof Date)
       ) {
         for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
+          if (isSensitiveKey(k2)) continue;
           // Não desce além de um nível — evita explosão e ciclos.
           if (
             v2 &&
