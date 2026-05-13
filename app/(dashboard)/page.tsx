@@ -68,44 +68,33 @@ export default async function DashboardHomePage({
 
   const sp = await searchParams;
   const filialFilter =
-    session.user.role === "admin"
-      ? sp.filial?.trim() || undefined
-      : undefined;
+    session.user.role === "admin" ? sp.filial?.trim() || undefined : undefined;
   const ufFilter = sp.uf?.trim() || undefined;
   const concessionariaFilter = sp.conc?.trim() || undefined;
 
   const period = periodFromQuery({ ano: sp.ano, mes: sp.mes });
 
-  const [
-    kpis,
-    alerts,
-    serieRaw,
-    atencaoRaw,
-    orcadoRealizadoRaw,
-    ufsRaw,
-    concessionariasRaw,
-    filialOptions,
-    yearOptions,
-    ufOptions,
-    concessionariaOptions,
-  ] = await Promise.all([
-    getKpis(filialFilter, period, ufFilter),
-    getAlerts(filialFilter, ufFilter),
-    getGeracaoSerie(filialFilter, period, ufFilter),
-    getAtencao(filialFilter, period, ufFilter),
-    getOrcadoVsRealizado(filialFilter, ufFilter),
-    getUsinasPorUF(filialFilter, ufFilter),
-    getInjecaoPorConcessionaria(
-      filialFilter,
-      period,
-      ufFilter,
-      concessionariaFilter,
-    ),
-    getFilialOptions(),
-    getYearOptions(filialFilter),
-    getUfOptions(filialFilter),
-    getConcessionariaOptions(filialFilter),
-  ]);
+  const kpis = await getKpis(filialFilter, period, ufFilter);
+  const alerts = await getAlerts(filialFilter, ufFilter);
+  const serieRaw = await getGeracaoSerie(filialFilter, period, ufFilter);
+  const atencaoRaw = await getAtencao(
+    filialFilter,
+    period,
+    ufFilter,
+    concessionariaFilter,
+  );
+  const orcadoRealizadoRaw = await getOrcadoVsRealizado(filialFilter, ufFilter);
+  const ufsRaw = await getUsinasPorUF(filialFilter, ufFilter);
+  const concessionariasRaw = await getInjecaoPorConcessionaria(
+    filialFilter,
+    period,
+    ufFilter,
+    concessionariaFilter,
+  );
+  const filialOptions = await getFilialOptions();
+  const yearOptions = await getYearOptions(filialFilter);
+  const ufOptions = await getUfOptions(filialFilter);
+  const concessionariaOptions = await getConcessionariaOptions(filialFilter);
 
   const serie = serializePrisma(serieRaw) as typeof serieRaw;
   const orcadoRealizado = serializePrisma(
@@ -319,10 +308,7 @@ export default async function DashboardHomePage({
                   </thead>
                   <tbody>
                     {atencao.map((r, i) => (
-                      <tr
-                        key={`${r.usinaId ?? "-"}-${i}`}
-                        className="border-t"
-                      >
+                      <tr key={`${r.usinaId ?? "-"}-${i}`} className="border-t">
                         <td className="px-3 py-1.5">{r.usinaNome}</td>
                         <td className="px-3 py-1.5 text-right">
                           {fmtKwh(r.realizadoKwh)}
@@ -333,9 +319,7 @@ export default async function DashboardHomePage({
                         <td className="px-3 py-1.5 text-right">
                           <Badge
                             variant={
-                              r.pctAtingido >= 50
-                                ? "secondary"
-                                : "destructive"
+                              r.pctAtingido >= 50 ? "secondary" : "destructive"
                             }
                           >
                             {fmtPct(r.pctAtingido)}
@@ -368,8 +352,8 @@ export default async function DashboardHomePage({
             <MapPin className="h-4 w-4" /> Usinas por UF
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Substituto da renderização de mapa Brasil — distribuição por estado e
-            status.
+            Substituto da renderização de mapa Brasil — distribuição por estado
+            e status.
           </p>
         </CardHeader>
         <CardContent>

@@ -25,7 +25,10 @@ export function GeracaoChart({ data }: { data: Point[] }) {
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
+        <AreaChart
+          data={data}
+          margin={{ top: 8, right: 16, bottom: 4, left: 8 }}
+        >
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
           <XAxis dataKey="label" tick={{ fontSize: 11 }} />
           <YAxis
@@ -35,8 +38,15 @@ export function GeracaoChart({ data }: { data: Point[] }) {
           />
           <Tooltip
             formatter={(v) => [`${fmtKwh(Number(v))} kWh`, ""]}
-            labelStyle={{ fontSize: 12 }}
-            contentStyle={{ fontSize: 12 }}
+            labelStyle={{ color: "hsl(var(--foreground))", fontSize: 12 }}
+            itemStyle={{ color: "hsl(var(--foreground))", fontSize: 12 }}
+            contentStyle={{
+              backgroundColor: "hsl(var(--popover))",
+              borderColor: "hsl(var(--border))",
+              borderRadius: 8,
+              color: "hsl(var(--foreground))",
+              fontSize: 12,
+            }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           <Area

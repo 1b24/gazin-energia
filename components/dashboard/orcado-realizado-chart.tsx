@@ -33,31 +33,62 @@ export function OrcadoRealizadoChart({ data }: { data: Point[] }) {
     );
   }
   return (
-    <div className="h-72 w-full">
+    <div className="dashboard-orcado-chart h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-          <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+        <BarChart
+          data={data}
+          margin={{ top: 8, right: 16, bottom: 4, left: 8 }}
+        >
+          <CartesianGrid
+            stroke="var(--dashboard-chart-grid)"
+            strokeDasharray="3 3"
+          />
+          <XAxis
+            dataKey="mes"
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+            tickLine={{ stroke: "var(--border)" }}
+            axisLine={{ stroke: "var(--border)" }}
+          />
           <YAxis
-            tick={{ fontSize: 11 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             tickFormatter={(v) => fmtBRL(Number(v))}
+            tickLine={{ stroke: "var(--border)" }}
+            axisLine={{ stroke: "var(--border)" }}
             width={90}
           />
           <Tooltip
+            cursor={{ fill: "var(--dashboard-chart-hover)" }}
             formatter={(v) => [fmtBRL(Number(v)), ""]}
-            labelStyle={{ fontSize: 12 }}
-            contentStyle={{ fontSize: 12 }}
+            labelStyle={{
+              color: "var(--popover-foreground)",
+              fontSize: 12,
+            }}
+            itemStyle={{
+              color: "var(--popover-foreground)",
+              fontSize: 12,
+            }}
+            contentStyle={{
+              backgroundColor: "var(--popover)",
+              borderColor: "var(--border)",
+              borderRadius: 8,
+              color: "var(--popover-foreground)",
+              fontSize: 12,
+            }}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <Legend
+            wrapperStyle={{ color: "var(--muted-foreground)", fontSize: 12 }}
+          />
           <Bar
             dataKey="orcadoReais"
             name="Orçado"
-            fill="hsl(var(--muted-foreground) / 0.5)"
+            fill="var(--dashboard-chart-orcado)"
+            radius={[3, 3, 0, 0]}
           />
           <Bar
             dataKey="realizadoReais"
             name="Realizado"
-            fill="hsl(var(--primary))"
+            fill="var(--dashboard-chart-realizado)"
+            radius={[3, 3, 0, 0]}
           />
         </BarChart>
       </ResponsiveContainer>

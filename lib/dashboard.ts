@@ -14,7 +14,7 @@
  * cards podem ficar vazios. Não inventamos dados.
  */
 import { auth } from "@/lib/auth";
-import { scopedPrisma } from "@/lib/db";
+import { retryClosedConnection, scopedPrisma } from "@/lib/db";
 
 export const MESES_PT = [
   "Janeiro",
@@ -64,7 +64,13 @@ export function periodFromQuery(query: {
 }): CurrentPeriod {
   const ano = Number(query.ano);
   const mes = Number(query.mes);
-  if (!Number.isFinite(ano) || !Number.isFinite(mes) || ano < 2000 || mes < 1 || mes > 12) {
+  if (
+    !Number.isFinite(ano) ||
+    !Number.isFinite(mes) ||
+    ano < 2000 ||
+    mes < 1 ||
+    mes > 12
+  ) {
     return getCurrentPeriod();
   }
   return makePeriod(ano, mes - 1);
@@ -136,7 +142,9 @@ export interface DashboardKpis {
   usinasOperacionais: number;
 }
 
-function sumDias(dias: { kwh: { toNumber(): number } | number | null }[]): number {
+function sumDias(
+  dias: { kwh: { toNumber(): number } | number | null }[],
+): number {
   return dias.reduce((a, d) => {
     if (d.kwh == null) return a;
     const n = typeof d.kwh === "number" ? d.kwh : d.kwh.toNumber();
@@ -144,10 +152,38 @@ function sumDias(dias: { kwh: { toNumber(): number } | number | null }[]): numbe
   }, 0);
 }
 
-function decimalToNumber(v: { toNumber(): number } | number | null | undefined): number {
+function decimalToNumber(
+  v: { toNumber(): number } | number | null | undefined,
+): number {
   if (v == null) return 0;
   return typeof v === "number" ? v : v.toNumber();
 }
+
+function diasNoMes(
+  ano: number | null | undefined,
+  mes: string | null | undefined,
+) {
+  const mesIdx = (MESES_PT as readonly string[]).indexOf(mes ?? "");
+  if (ano == null || mesIdx < 0) return 31;
+  return new Date(ano, mesIdx + 1, 0).getDate();
+}
+
+function metaMensalGeracao(
+  metaDiaria: { toNumber(): number } | number | null | undefined,
+  ano: number | null | undefined,
+  mes: string | null | undefined,
+): number {
+  return decimalToNumber(metaDiaria) * diasNoMes(ano, mes);
+}
+
+function concessionariaNome(row: {
+  fornecedor?: { nome: string | null } | null;
+  fornecedorRaw?: string | null;
+}) {
+  return row.fornecedor?.nome?.trim() || row.fornecedorRaw?.trim() || "";
+}
+
+// `retryClosedConnection` agora vive em `lib/db.ts` (DB concern, não dashboard).
 
 export async function getKpis(
   filialFilter?: string,
@@ -158,24 +194,28 @@ export async function getKpis(
   const p = period ?? getCurrentPeriod();
 
   // Geração: filtra por mes pt-BR, agrega kWh dos dias, soma metas.
-  const geracoes = await db.geracao.findMany({
-    where: {
-      ano: p.ano,
-      mes: p.mesPt,
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-    select: {
-      metaMensal: true,
-      dias: { select: { kwh: true } },
-    },
-  });
+  const geracoes = await retryClosedConnection(() =>
+    db.geracao.findMany({
+      where: {
+        ano: p.ano,
+        mes: p.mesPt,
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+      select: {
+        ano: true,
+        mes: true,
+        metaMensal: true,
+        dias: { select: { kwh: true } },
+      },
+    }),
+  );
   const geracaoRealizadaKwh = geracoes.reduce(
     (acc, g) => acc + sumDias(g.dias),
     0,
   );
   const geracaoMetaKwh = geracoes.reduce(
-    (acc, g) => acc + decimalToNumber(g.metaMensal),
+    (acc, g) => acc + metaMensalGeracao(g.metaMensal, g.ano, g.mes),
     0,
   );
   const geracaoPctAtingido =
@@ -323,19 +363,21 @@ export async function getGeracaoSerie(
   const window = last12MonthsEndingAt(period);
 
   const anos = Array.from(new Set(window.map((w) => w.ano)));
-  const geracoes = await db.geracao.findMany({
-    where: {
-      ano: { in: anos },
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-    select: {
-      ano: true,
-      mes: true,
-      metaMensal: true,
-      dias: { select: { kwh: true } },
-    },
-  });
+  const geracoes = await retryClosedConnection(() =>
+    db.geracao.findMany({
+      where: {
+        ano: { in: anos },
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+      select: {
+        ano: true,
+        mes: true,
+        metaMensal: true,
+        dias: { select: { kwh: true } },
+      },
+    }),
+  );
 
   // Indexa por (ano, mesIdx) → soma realizado, soma meta.
   const map = new Map<string, { real: number; meta: number }>();
@@ -345,7 +387,7 @@ export async function getGeracaoSerie(
     const key = `${g.ano}-${mesIdx}`;
     const cur = map.get(key) ?? { real: 0, meta: 0 };
     cur.real += sumDias(g.dias);
-    cur.meta += decimalToNumber(g.metaMensal);
+    cur.meta += metaMensalGeracao(g.metaMensal, g.ano, g.mes);
     map.set(key, cur);
   }
 
@@ -377,30 +419,68 @@ export async function getAtencao(
   filialFilter?: string,
   period?: CurrentPeriod,
   ufFilter?: string,
+  concessionariaFilter?: string,
 ): Promise<AtencaoRow[]> {
   const { db } = await getDb(filialFilter);
   const p = period ?? getCurrentPeriod();
 
-  const geracoes = await db.geracao.findMany({
-    where: {
-      ano: p.ano,
-      mes: p.mesPt,
-      deletedAt: null,
-      metaMensal: { not: null, gt: 0 },
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-    select: {
-      usinaId: true,
-      metaMensal: true,
-      usina: { select: { nome: true } },
-      nomeUsinaRaw: true,
-      dias: { select: { kwh: true } },
-    },
-  });
+  let concessionariaFilialIds: string[] | undefined;
+  if (concessionariaFilter) {
+    const injecoes = await db.injecao.findMany({
+      where: {
+        ano: p.ano,
+        mes: p.mesPt,
+        deletedAt: null,
+        ...scopeWhere("filial", filialFilter, ufFilter),
+      },
+      select: {
+        filialId: true,
+        fornecedor: { select: { nome: true } },
+        fornecedorRaw: true,
+      },
+    });
+
+    concessionariaFilialIds = Array.from(
+      new Set(
+        injecoes
+          .filter((i) => concessionariaNome(i) === concessionariaFilter)
+          .map((i) => i.filialId)
+          .filter((id): id is string => !!id),
+      ),
+    );
+
+    if (concessionariaFilialIds.length === 0) return [];
+  }
+
+  const geracoes = await retryClosedConnection(() =>
+    db.geracao.findMany({
+      where: {
+        ano: p.ano,
+        mes: p.mesPt,
+        deletedAt: null,
+        metaMensal: { not: null, gt: 0 },
+        AND: [
+          scopeWhere("usina", filialFilter, ufFilter),
+          ...(concessionariaFilialIds
+            ? [{ usina: { filialId: { in: concessionariaFilialIds } } }]
+            : []),
+        ],
+      },
+      select: {
+        ano: true,
+        mes: true,
+        usinaId: true,
+        metaMensal: true,
+        usina: { select: { nome: true } },
+        nomeUsinaRaw: true,
+        dias: { select: { kwh: true } },
+      },
+    }),
+  );
 
   const rows: AtencaoRow[] = geracoes.map((g) => {
     const real = sumDias(g.dias);
-    const meta = decimalToNumber(g.metaMensal);
+    const meta = metaMensalGeracao(g.metaMensal, g.ano, g.mes);
     const pct = meta > 0 ? (real / meta) * 100 : 0;
     return {
       usinaId: g.usinaId,
@@ -461,7 +541,9 @@ export async function getOrcadoVsRealizado(
   return Array.from(map.entries())
     .map(([mes, v]) => ({ mes, orcadoReais: v.orc, realizadoReais: v.real }))
     .sort(
-      (a, b) => (MESES_PT as readonly string[]).indexOf(a.mes) - (MESES_PT as readonly string[]).indexOf(b.mes),
+      (a, b) =>
+        (MESES_PT as readonly string[]).indexOf(a.mes) -
+        (MESES_PT as readonly string[]).indexOf(b.mes),
     );
 }
 
@@ -579,21 +661,23 @@ export async function getInjecaoPorConcessionaria(
         })
       : [];
 
-  const consumoByUc = new Map<string, number>();
+  // Chave composta `uc|filialId` — UC sozinha pode repetir entre filiais e o
+  // ano/mês já estão fixos no `where` acima. Sem `filialId` o mesmo consumo
+  // era atribuído a múltiplas concessionárias quando UCs colidiam.
+  const consumoByKey = new Map<string, number>();
   for (const c of consumos) {
-    if (!c.uc) continue;
-    consumoByUc.set(
-      c.uc,
-      (consumoByUc.get(c.uc) ?? 0) + decimalToNumber(c.consumoTotal),
+    if (!c.uc || !c.filialId) continue;
+    const key = `${c.uc}|${c.filialId}`;
+    consumoByKey.set(
+      key,
+      (consumoByKey.get(key) ?? 0) + decimalToNumber(c.consumoTotal),
     );
   }
 
   const buckets = new Map<string, ConcessionariaRow>();
   for (const i of injecoes) {
     const nome =
-      i.fornecedor?.nome?.trim() ||
-      i.fornecedorRaw?.trim() ||
-      "Não informada";
+      i.fornecedor?.nome?.trim() || i.fornecedorRaw?.trim() || "Não informada";
     if (concessionariaFilter && nome !== concessionariaFilter) continue;
 
     const cur =
@@ -608,7 +692,9 @@ export async function getInjecaoPorConcessionaria(
     cur.ucs += 1;
     cur.injetadoKwh += decimalToNumber(i.consumoTotalKwh);
     cur.valorReais += decimalToNumber(i.valor);
-    if (i.uc) cur.consumoKwh += consumoByUc.get(i.uc) ?? 0;
+    if (i.uc && i.filialId) {
+      cur.consumoKwh += consumoByKey.get(`${i.uc}|${i.filialId}`) ?? 0;
+    }
     buckets.set(nome, cur);
   }
 
@@ -637,8 +723,7 @@ export async function getConcessionariaOptions(
   });
   const set = new Set<string>();
   for (const r of rows) {
-    const nome =
-      r.fornecedor?.nome?.trim() || r.fornecedorRaw?.trim() || "";
+    const nome = r.fornecedor?.nome?.trim() || r.fornecedorRaw?.trim() || "";
     if (nome) set.add(nome);
   }
   return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
@@ -659,7 +744,7 @@ export interface FilialOption {
  */
 export async function getUfOptions(filialFilter?: string): Promise<string[]> {
   const { db } = await getDb(filialFilter);
-  const [u, f] = await Promise.all([
+  const u = await retryClosedConnection(() =>
     db.usina.findMany({
       where: {
         deletedAt: null,
@@ -669,6 +754,8 @@ export async function getUfOptions(filialFilter?: string): Promise<string[]> {
       select: { uf: true },
       distinct: ["uf"],
     }),
+  );
+  const f = await retryClosedConnection(() =>
     db.filial.findMany({
       where: {
         deletedAt: null,
@@ -678,7 +765,7 @@ export async function getUfOptions(filialFilter?: string): Promise<string[]> {
       select: { uf: true },
       distinct: ["uf"],
     }),
-  ]);
+  );
   const set = new Set<string>();
   for (const r of u) if (r.uf) set.add(r.uf);
   for (const r of f) if (r.uf) set.add(r.uf);
@@ -691,7 +778,7 @@ export async function getUfOptions(filialFilter?: string): Promise<string[]> {
  */
 export async function getYearOptions(filialFilter?: string): Promise<number[]> {
   const { db } = await getDb(filialFilter);
-  const [g, c] = await Promise.all([
+  const g = await retryClosedConnection(() =>
     db.geracao.findMany({
       where: {
         ano: { not: null },
@@ -701,16 +788,16 @@ export async function getYearOptions(filialFilter?: string): Promise<number[]> {
       select: { ano: true },
       distinct: ["ano"],
     }),
-    db.consumo.findMany({
-      where: {
-        ano: { not: null },
-        deletedAt: null,
-        ...(filialFilter ? { filialId: filialFilter } : {}),
-      },
-      select: { ano: true },
-      distinct: ["ano"],
-    }),
-  ]);
+  );
+  const c = await db.consumo.findMany({
+    where: {
+      ano: { not: null },
+      deletedAt: null,
+      ...(filialFilter ? { filialId: filialFilter } : {}),
+    },
+    select: { ano: true },
+    distinct: ["ano"],
+  });
   const set = new Set<number>([new Date().getFullYear()]);
   for (const r of g) if (r.ano != null) set.add(r.ano);
   for (const r of c) if (r.ano != null) set.add(r.ano);
