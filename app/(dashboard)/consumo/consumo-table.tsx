@@ -38,7 +38,7 @@ import {
 import { useAnalyticsFilters } from "@/lib/hooks/use-analytics-filters";
 import { mesIndex, periodKey, periodoLabel } from "@/lib/period";
 import { buildConsumoFormFields, consumoSchema } from "@/lib/schemas/consumo";
-import type { FilialOption } from "@/lib/schemas/usina";
+import type { FilialPickerOption } from "@/lib/schemas/consumo";
 import type { Serialized } from "@/lib/serialize";
 
 import * as actions from "./actions";
@@ -795,7 +795,7 @@ function renderDetails(c: ConsumoRow) {
 
 interface Props {
   rows: ConsumoRow[];
-  filialOptions: FilialOption[];
+  filialOptions: FilialPickerOption[];
 }
 
 export function ConsumoTable({ rows, filialOptions }: Props) {

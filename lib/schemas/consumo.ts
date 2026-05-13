@@ -8,7 +8,21 @@ import { z } from "zod";
 
 import type { FormFieldConfig } from "@/components/forms/entity-form";
 import { MESES_PT } from "@/lib/period";
-import type { FilialOption } from "./usina";
+
+/**
+ * Subset da Filial usado pelo picker do form de Consumo. Carrega `uc` e
+ * `municipio` além do label — são copiados via `linksTo` quando o usuário
+ * escolhe a filial. Tipo paralelo a `FilialPickerOption` em
+ * `lib/schemas/injecao.ts` — quando um terceiro consumidor aparecer, vale
+ * extrair pra `lib/schemas/filial.ts`.
+ */
+export interface FilialPickerOption {
+  id: string;
+  codigo: string | null;
+  mercadoLivre: string | null;
+  uc: string | null;
+  municipio: string | null;
+}
 
 function nullishToNull(s: string | null | undefined) {
   return s == null || s === "" ? null : s.trim();
@@ -68,7 +82,7 @@ export const consumoSchema = z.object({
 export type ConsumoInput = z.infer<typeof consumoSchema>;
 
 export function buildConsumoFormFields(
-  filialOptions: FilialOption[],
+  filialOptions: FilialPickerOption[],
 ): FormFieldConfig[] {
   return [
     {
@@ -76,11 +90,18 @@ export function buildConsumoFormFields(
       label: "Filial",
       type: "select",
       span: 2,
+      placeholder: "Selecione a filial...",
       options: filialOptions.map((f) => ({
         value: f.id,
         label: [f.codigo, f.mercadoLivre].filter(Boolean).join(" — ") || f.id,
+        // Carregadas pra serem copiadas via linksTo quando a filial mudar:
+        uc: f.uc,
+        municipio: f.municipio,
       })),
-      placeholder: "Selecione a filial...",
+      // Auto-preenche `uc` e `municipio` ao escolher a filial. Usuário pode
+      // sobrescrever manualmente depois.
+      linksTo: { uc: "uc", municipio: "municipio" },
+      helpText: "UC e município preenchem sozinhos a partir da filial.",
     },
     {
       name: "ano",

@@ -25,7 +25,15 @@ export default async function ConsumoPage() {
     retryClosedConnection(() =>
       db.filial.findMany({
         where: { deletedAt: null },
-        select: { id: true, codigo: true, mercadoLivre: true },
+        // `uc` e `municipio` precisam vir pra alimentar o linksTo do form
+        // de Consumo (auto-preenche ao escolher a filial).
+        select: {
+          id: true,
+          codigo: true,
+          mercadoLivre: true,
+          uc: true,
+          municipio: true,
+        },
         orderBy: { codigo: "asc" },
       }),
     ),
