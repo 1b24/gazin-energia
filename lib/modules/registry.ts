@@ -23,6 +23,20 @@ export const MODULES: ModuleDefinition[] = [
     prismaModel: "Fornecedor",
   },
   {
+    id: "distribuidoras",
+    label: "Distribuidoras",
+    icon: "Zap",
+    basePath: "/distribuidoras",
+    prismaModel: "Distribuidora",
+  },
+  {
+    id: "tarifas",
+    label: "Tarifas de Energia",
+    icon: "DollarSign",
+    basePath: "/tarifas",
+    prismaModel: "TarifaEnergia",
+  },
+  {
     id: "juridico",
     label: "Jurídico",
     icon: "Scale",

@@ -25,6 +25,8 @@ export const ENTITY_STATUS: Record<string, EntityStatus> = {
   Orcamento: "active",
   CronogramaLimpeza: "active",
   ManutencaoPreventiva: "active",
+  Distribuidora: "active",
+  TarifaEnergia: "active",
 
   // --- STUBS — aguardando JSON do sistema antigo ---
   Licenca: "stub",

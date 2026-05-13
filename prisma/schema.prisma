@@ -95,6 +95,23 @@ enum AuditAction {
   hard_delete
 }
 
+/// Origem de uma tarifa de kWh — discrimina TarifaEnergia.
+/// - `fornecedor`    : mercado livre, contrato bilateral com comercializadora.
+/// - `distribuidora` : cativo, tarifa regulada da concessionária local.
+enum OrigemTarifa {
+  fornecedor
+  distribuidora
+}
+
+/// Tipo de fornecimento do Fornecedor — discrimina o que ele entrega.
+/// Habilita o cadastro de tarifa de kWh só para `comercializadora`.
+enum TipoFornecimento {
+  comercializadora // vende energia (kWh ponta/fora ponta)
+  servico          // manutenção, limpeza, viagens, consultoria
+  equipamento      // peças, módulos, inversores
+  outro
+}
+
 // =============================================================================
 // CORE
 // =============================================================================
@@ -191,7 +208,11 @@ model Fornecedor {
 
   nome              String?
   cnpj              String?
-  status            StatusEntidade @default(ativo)
+  status            StatusEntidade   @default(ativo)
+  /// Discrimina o que o fornecedor entrega. Habilita o cadastro de tarifa
+  /// de kWh no form quando = `comercializadora`. Default `outro` mantém
+  /// o cadastro existente inalterado.
+  tipoFornecimento  TipoFornecimento @default(outro)
   escopoServico     String?
   inicioPrestacao   DateTime?
   terminoPrestacao  DateTime?
@@ -210,9 +231,11 @@ model Fornecedor {
   consertos       ConsertoEquipamento[]
   manutencoesCorr ManutencaoCorretiva[]
   injecoes        Injecao[]
+  tarifas         TarifaEnergia[]
 
   @@index([cnpj])
   @@index([status])
+  @@index([tipoFornecimento])
   @@index([abrangenciaFilialId])
   @@index([deletedAt])
 }
@@ -623,5 +646,79 @@ model Documento {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  @@index([deletedAt])
+}
+
+// =============================================================================
+// TARIFAS — comparação fornecedor (mercado livre) × distribuidora (cativo)
+// =============================================================================
+
+/// Concessionária de distribuição regulada (Energisa, Copel, Enel, Light,
+/// Cemig, etc.). Tarifa publicada ANEEL; entidade global, pouco volume
+/// (~10 registros típicos), cadastrada manualmente ou via seed.
+model Distribuidora {
+  id          String  @id @default(cuid())
+  nome        String  @unique
+  /// Sigla curta usada em rótulos compactos. Ex: "ENERGISA-MS", "COPEL".
+  sigla       String?
+  /// Código oficial ANEEL — referência externa, não usado em joins.
+  codigoAneel String?
+  /// UF principal de atuação. Distribuidora pode cobrir várias UFs, mas
+  /// para o cadastro inicial guardamos só a principal.
+  uf          UF?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tarifas TarifaEnergia[]
+
+  @@index([uf])
+  @@index([deletedAt])
+}
+
+/// Tarifa de kWh — vigente em um intervalo. Polimórfica: pertence a um
+/// `Fornecedor` (mercado livre) OU a uma `Distribuidora` (cativo regulado),
+/// nunca aos dois ao mesmo tempo. O enum `origem` indica qual FK é válida.
+///
+/// Histórico: cada reajuste cria registro novo (com `vigenciaInicio` da
+/// nova tarifa). Para fechar a vigência da anterior, preenche
+/// `vigenciaFim` dela. `vigenciaFim = null` significa tarifa vigente.
+model TarifaEnergia {
+  id     String       @id @default(cuid())
+  origem OrigemTarifa
+
+  // FK polimórfica — exatamente uma das duas deve ser preenchida.
+  // A consistência (`origem === "fornecedor"` ⇒ fornecedorId != null) é
+  // garantida no schema Zod (lib/schemas/tarifa-energia.ts), não no DB —
+  // Prisma não tem CHECK condicional nativo.
+  fornecedor      Fornecedor?    @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  fornecedorId    String?
+  distribuidora   Distribuidora? @relation(fields: [distribuidoraId], references: [id], onDelete: Restrict)
+  distribuidoraId String?
+
+  /// R$/kWh — precisão 4 decimais para acomodar tarifas com centavos finos
+  /// (ex: 0,4567 R$/kWh). Decimal evita ruído de float.
+  valorPonta     Decimal? @db.Decimal(10, 4)
+  valorForaPonta Decimal? @db.Decimal(10, 4)
+
+  vigenciaInicio DateTime
+  /// null = tarifa atual. Preencher quando uma tarifa nova entrar em vigor.
+  vigenciaFim    DateTime?
+
+  /// Específico de distribuidora — verde / azul / convencional / branca.
+  /// Para fornecedor (mercado livre) costuma ficar null.
+  modalidade String?
+
+  observacao String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([origem])
+  @@index([fornecedorId])
+  @@index([distribuidoraId])
+  @@index([vigenciaInicio])
   @@index([deletedAt])
 }

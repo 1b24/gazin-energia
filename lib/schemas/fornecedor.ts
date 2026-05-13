@@ -5,7 +5,7 @@
  * runtime via `buildFornecedorFormFields(filialOptions)`.
  */
 import { z } from "zod";
-import { StatusEntidade } from "@prisma/client";
+import { StatusEntidade, TipoFornecimento } from "@prisma/client";
 
 import type { FormFieldConfig } from "@/components/forms/entity-form";
 import type { FilialOption } from "./usina";
@@ -14,6 +14,18 @@ const STATUS_VALUES = Object.values(StatusEntidade) as [
   StatusEntidade,
   ...StatusEntidade[],
 ];
+
+const TIPO_FORNECIMENTO_VALUES = Object.values(TipoFornecimento) as [
+  TipoFornecimento,
+  ...TipoFornecimento[],
+];
+
+const TIPO_FORNECIMENTO_LABEL: Record<TipoFornecimento, string> = {
+  comercializadora: "Comercializadora (vende kWh)",
+  servico: "Serviço",
+  equipamento: "Equipamento",
+  outro: "Outro",
+};
 
 function nullishToNull(s: string | null | undefined) {
   return s == null || s === "" ? null : s.trim();
@@ -52,6 +64,9 @@ export const fornecedorSchema = z.object({
   status: z
     .preprocess(emptyToNull, z.enum(STATUS_VALUES).nullable())
     .transform((s) => s ?? "ativo" as StatusEntidade),
+  tipoFornecimento: z
+    .preprocess(emptyToNull, z.enum(TIPO_FORNECIMENTO_VALUES).nullable())
+    .transform((t) => t ?? ("outro" as TipoFornecimento)),
 
   escopoServico: z.preprocess(nullishToNull, z.string().nullable()),
   idContratoZoho: z.preprocess(nullishToNull, z.string().nullable()),
@@ -81,6 +96,18 @@ export function buildFornecedorFormFields(
         value: s,
         label: s.charAt(0).toUpperCase() + s.slice(1),
       })),
+    },
+    {
+      name: "tipoFornecimento",
+      label: "Tipo de fornecimento",
+      type: "select",
+      span: 2,
+      options: TIPO_FORNECIMENTO_VALUES.map((t) => ({
+        value: t,
+        label: TIPO_FORNECIMENTO_LABEL[t],
+      })),
+      helpText:
+        'Marcar como "Comercializadora" habilita o cadastro de tarifa de kWh em /tarifas.',
     },
     { name: "escopoServico", label: "Escopo de serviço", type: "text", span: 2, placeholder: "Auto-Geração de energia, ..." },
     { name: "inicioPrestacao", label: "Início da prestação", type: "date", span: 1 },
