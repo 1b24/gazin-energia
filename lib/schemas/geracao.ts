@@ -109,7 +109,7 @@ export function buildGeracaoFormFields(
     },
     {
       name: "metaMensal",
-      label: "Meta mensal (kWh)",
+      label: "Meta diária (kWh)",
       type: "currency",
       span: 1,
       placeholder: "0,00",

@@ -9,8 +9,19 @@
  */
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Geracao, GeracaoDia, Usina } from "@prisma/client";
-import { Pencil, Save, X } from "lucide-react";
-import { useMemo, useState, useTransition } from "react";
+import {
+  AlertTriangle,
+  BarChart3,
+  BatteryCharging,
+  Gauge,
+  Pencil,
+  Save,
+  Target,
+  TrendingUp,
+  X,
+  Zap,
+} from "lucide-react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 
 import {
   DetailField,
@@ -19,7 +30,15 @@ import {
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   buildGeracaoFormFields,
   geracaoSchema,
@@ -42,12 +61,487 @@ function formatKwh(n: number | null | undefined): string {
   });
 }
 
+const fmtCompact = (n: number) =>
+  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+
+const fmtPct = (n: number | null | undefined) =>
+  n == null || !Number.isFinite(n)
+    ? "—"
+    : `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+
 function totalKwh(dias: GeracaoRow["dias"]): number {
   return dias.reduce((acc, d) => acc + (d.kwh ?? 0), 0);
 }
 
 function diasComDado(dias: GeracaoRow["dias"]): number {
   return dias.filter((d) => d.kwh != null && d.kwh > 0).length;
+}
+
+const MESES_PT = [
+  "Janeiro",
+  "Fevereiro",
+  "Março",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro",
+] as const;
+
+function diasNoMes(
+  ano: number | null | undefined,
+  mes: string | null | undefined,
+) {
+  const mesIdx = mesIndex(mes);
+  if (ano == null || mesIdx < 0) return 31;
+  return new Date(ano, mesIdx + 1, 0).getDate();
+}
+
+function mesIndex(mes: string | null | undefined) {
+  if (!mes) return -1;
+  const normalized = mes.trim().toLowerCase();
+  return (MESES_PT as readonly string[]).findIndex(
+    (m) => m.toLowerCase() === normalized,
+  );
+}
+
+function periodKey(row: GeracaoRow) {
+  const ano = row.ano ?? 0;
+  const mesIdx = mesIndex(row.mes);
+  return `${ano}-${String(mesIdx).padStart(2, "0")}`;
+}
+
+function periodSort(
+  a: { ano: number; mesIdx: number },
+  b: { ano: number; mesIdx: number },
+) {
+  return a.ano - b.ano || a.mesIdx - b.mesIdx;
+}
+
+function metaMensalCalculada(g: GeracaoRow): number | null {
+  if (g.metaMensal == null) return null;
+  return g.metaMensal * diasNoMes(g.ano, g.mes);
+}
+
+function estimativaMensal(g: GeracaoRow): number {
+  const total = totalKwh(g.dias);
+  const ativos = diasComDado(g.dias);
+  if (ativos === 0) return 0;
+  return (total / ativos) * diasNoMes(g.ano, g.mes);
+}
+
+function usinaLabel(g: GeracaoRow) {
+  return g.usina?.nome?.trim() || g.nomeUsinaRaw?.trim() || "Sem usina";
+}
+
+function periodoLabel(g: GeracaoRow) {
+  return g.mes && g.ano ? `${g.mes}/${g.ano}` : "Sem período";
+}
+
+function MetricCard({
+  title,
+  value,
+  description,
+  icon,
+}: {
+  title: string;
+  value: ReactNode;
+  description?: ReactNode;
+  icon: ReactNode;
+}) {
+  return (
+    <Card size="sm" className="min-h-28">
+      <CardHeader className="pb-0">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-xs font-medium text-muted-foreground">
+            {title}
+          </CardTitle>
+          <div className="text-muted-foreground">{icon}</div>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col justify-end gap-1">
+        <div className="text-xl font-semibold leading-tight [overflow-wrap:anywhere]">
+          {value}
+        </div>
+        {description ? (
+          <div className="text-xs text-muted-foreground">{description}</div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Bar({
+  value,
+  max,
+  className = "bg-primary",
+}: {
+  value: number;
+  max: number;
+  className?: string;
+}) {
+  const width =
+    max > 0 && value > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
+  return (
+    <div className="h-2 rounded-full bg-muted">
+      <div
+        className={`h-full rounded-full ${className}`}
+        style={{ width: `${width}%` }}
+      />
+    </div>
+  );
+}
+
+function progressPct(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function metaBarClass(value: number | null | undefined) {
+  if (value == null) return "bg-muted-foreground/40";
+  if (value >= 100) return "bg-emerald-500";
+  if (value >= 80) return "bg-amber-500";
+  return "bg-destructive";
+}
+
+function EmptyAnalytics() {
+  return (
+    <Card>
+      <CardContent className="py-6 text-sm text-muted-foreground">
+        Sem dados de geração para analisar.
+      </CardContent>
+    </Card>
+  );
+}
+
+function GeracaoAnalytics({ rows }: { rows: GeracaoRow[] }) {
+  const periodOptions = useMemo(() => {
+    const periods = new Map<
+      string,
+      { key: string; label: string; ano: number; mesIdx: number }
+    >();
+
+    for (const row of rows) {
+      const ano = row.ano ?? 0;
+      const mesIdx = mesIndex(row.mes);
+      if (ano <= 0 || mesIdx < 0) continue;
+      const key = periodKey(row);
+      periods.set(key, {
+        key,
+        label: periodoLabel(row),
+        ano,
+        mesIdx,
+      });
+    }
+
+    return [...periods.values()].sort(periodSort);
+  }, [rows]);
+  const latestPeriodKey = periodOptions.at(-1)?.key ?? "__all__";
+  const [selectedPeriodKey, setSelectedPeriodKey] = useState<string | null>(
+    null,
+  );
+  const selectedPeriodIsValid =
+    selectedPeriodKey === "__all__" ||
+    periodOptions.some((option) => option.key === selectedPeriodKey);
+  const effectivePeriodKey =
+    selectedPeriodIsValid && selectedPeriodKey
+      ? selectedPeriodKey
+      : latestPeriodKey;
+  const selectedRows = useMemo(
+    () =>
+      effectivePeriodKey === "__all__"
+        ? rows
+        : rows.filter((row) => periodKey(row) === effectivePeriodKey),
+    [effectivePeriodKey, rows],
+  );
+  const selectedPeriodLabel =
+    effectivePeriodKey === "__all__"
+      ? "Todos os períodos"
+      : (periodOptions.find((option) => option.key === effectivePeriodKey)
+          ?.label ?? "Período mais recente");
+  const periodItems = useMemo(
+    () => [
+      { value: "__all__", label: "Todos os períodos" },
+      ...[...periodOptions]
+        .reverse()
+        .map((option) => ({ value: option.key, label: option.label })),
+    ],
+    [periodOptions],
+  );
+
+  const data = useMemo(() => {
+    const totalRealizado = selectedRows.reduce(
+      (acc, row) => acc + totalKwh(row.dias),
+      0,
+    );
+    const totalEstimado = selectedRows.reduce(
+      (acc, row) => acc + estimativaMensal(row),
+      0,
+    );
+    const totalMeta = selectedRows.reduce(
+      (acc, row) => acc + (metaMensalCalculada(row) ?? 0),
+      0,
+    );
+    const usinas = new Set(selectedRows.map((row) => usinaLabel(row)));
+    const diasInformados = selectedRows.reduce(
+      (acc, row) => acc + diasComDado(row.dias),
+      0,
+    );
+
+    const usinasRank = new Map<
+      string,
+      {
+        label: string;
+        registros: number;
+        realizado: number;
+        estimado: number;
+        meta: number;
+      }
+    >();
+    const periodos = new Map<
+      string,
+      {
+        label: string;
+        ano: number;
+        mesIdx: number;
+        realizado: number;
+        estimado: number;
+        meta: number;
+      }
+    >();
+
+    for (const row of selectedRows) {
+      const label = usinaLabel(row);
+      const realizado = totalKwh(row.dias);
+      const estimado = estimativaMensal(row);
+      const meta = metaMensalCalculada(row) ?? 0;
+
+      const currentUsina = usinasRank.get(label) ?? {
+        label,
+        registros: 0,
+        realizado: 0,
+        estimado: 0,
+        meta: 0,
+      };
+      currentUsina.registros += 1;
+      currentUsina.realizado += realizado;
+      currentUsina.estimado += estimado;
+      currentUsina.meta += meta;
+      usinasRank.set(label, currentUsina);
+
+      const mesIdx = mesIndex(row.mes);
+      const ano = row.ano ?? 0;
+      const key = periodKey(row);
+      const currentPeriod = periodos.get(key) ?? {
+        label: periodoLabel(row),
+        ano,
+        mesIdx,
+        realizado: 0,
+        estimado: 0,
+        meta: 0,
+      };
+      currentPeriod.realizado += realizado;
+      currentPeriod.estimado += estimado;
+      currentPeriod.meta += meta;
+      periodos.set(key, currentPeriod);
+    }
+
+    const usinasOrdenadas = [...usinasRank.values()]
+      .map((item) => ({
+        ...item,
+        diferenca: item.estimado - item.meta,
+        pctMeta: item.meta > 0 ? (item.realizado / item.meta) * 100 : null,
+      }))
+      .sort((a, b) => b.realizado - a.realizado);
+
+    const abaixoMeta = [...usinasOrdenadas]
+      .filter((item) => item.meta > 0 && item.estimado < item.meta)
+      .sort((a, b) => a.diferenca - b.diferenca);
+
+    const periodosRank = [...periodos.values()].sort(periodSort);
+
+    return {
+      totalRealizado,
+      totalEstimado,
+      totalMeta,
+      diferenca: totalEstimado - totalMeta,
+      pctMeta: totalMeta > 0 ? (totalEstimado / totalMeta) * 100 : null,
+      usinasCount: usinas.size,
+      diasInformados,
+      usinasOrdenadas,
+      abaixoMeta,
+      periodosRank,
+    };
+  }, [selectedRows]);
+
+  if (rows.length === 0) return <EmptyAnalytics />;
+
+  const maxPeriodo = Math.max(
+    ...data.periodosRank.map((item) => item.realizado),
+    0,
+  );
+  const diffIsPositive = data.diferenca >= 0;
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">Indicadores de geração</div>
+          <div className="text-xs text-muted-foreground">
+            Período analisado: {selectedPeriodLabel}
+          </div>
+        </div>
+        <Select
+          items={periodItems}
+          value={effectivePeriodKey}
+          onValueChange={(value) => setSelectedPeriodKey(value)}
+        >
+          <SelectTrigger className="h-8 w-full text-xs sm:w-56">
+            <SelectValue placeholder="Período" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">Todos os períodos</SelectItem>
+            {periodItems
+              .filter((item) => item.value !== "__all__")
+              .map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="Geração realizada"
+          value={`${fmtCompact(data.totalRealizado)} kWh`}
+          description={`${data.usinasCount} usina(s) · ${data.diasInformados} dia(s) com dado`}
+          icon={<Zap className="h-4 w-4" />}
+        />
+        <MetricCard
+          title="Geração estimada"
+          value={`${fmtCompact(data.totalEstimado)} kWh`}
+          description="média dos dias informados x dias do mês"
+          icon={<TrendingUp className="h-4 w-4" />}
+        />
+        <MetricCard
+          title="Diferença vs meta"
+          value={`${diffIsPositive ? "+" : ""}${fmtCompact(data.diferenca)} kWh`}
+          description={`${fmtPct(data.pctMeta)} da meta com fator climático`}
+          icon={<Target className="h-4 w-4" />}
+        />
+        <MetricCard
+          title="Economia energética"
+          value={`${fmtCompact(data.totalEstimado)} kWh`}
+          description="projeção de energia a compensar; sem conversão R$"
+          icon={<BatteryCharging className="h-4 w-4" />}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Ranking de geração por usina</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {data.usinasOrdenadas.slice(0, 8).map((item) => (
+              <div key={item.label} className="space-y-1.5">
+                <div className="flex items-start justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{item.label}</div>
+                    <div className="text-muted-foreground">
+                      {item.registros} registro(s) · estimado{" "}
+                      {fmtCompact(item.estimado)} kWh
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-medium">
+                      {fmtCompact(item.realizado)} kWh
+                    </div>
+                    <div className="text-muted-foreground">
+                      {fmtPct(item.pctMeta)} da meta climática
+                    </div>
+                  </div>
+                </div>
+                <Bar
+                  value={progressPct(item.pctMeta)}
+                  max={100}
+                  className={metaBarClass(item.pctMeta)}
+                />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle>Atenção de geração</CardTitle>
+              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {data.abaixoMeta.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma usina abaixo da meta pelo cálculo estimado.
+              </p>
+            ) : (
+              data.abaixoMeta.slice(0, 6).map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-start justify-between gap-3 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{item.label}</div>
+                    <div className="text-muted-foreground">
+                      estimado {fmtCompact(item.estimado)} kWh
+                    </div>
+                  </div>
+                  <Badge variant="destructive">
+                    {fmtCompact(item.diferenca)} kWh
+                  </Badge>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle>Evolução por período</CardTitle>
+            <Gauge className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {data.periodosRank.map((item) => (
+            <div key={`${item.ano}-${item.mesIdx}`} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium">{item.label}</span>
+                <span className="text-muted-foreground">
+                  {fmtCompact(item.realizado)} kWh
+                </span>
+              </div>
+              <Bar
+                value={item.realizado}
+                max={maxPeriodo}
+                className="bg-emerald-500"
+              />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </section>
+  );
 }
 
 const columns: ColumnDef<GeracaoRow, unknown>[] = [
@@ -70,24 +564,35 @@ const columns: ColumnDef<GeracaoRow, unknown>[] = [
     accessorKey: "mes",
     header: "Mês",
     cell: ({ row }) =>
-      row.original.mes ? <Badge variant="secondary">{row.original.mes}</Badge> : "—",
+      row.original.mes ? (
+        <Badge variant="secondary">{row.original.mes}</Badge>
+      ) : (
+        "—"
+      ),
   },
   {
     id: "totalKwh",
+    accessorFn: (row) => totalKwh(row.dias),
     header: "Total kWh",
     cell: ({ row }) => formatKwh(totalKwh(row.original.dias)),
   },
   {
     id: "metaMensal",
+    accessorFn: (row) => metaMensalCalculada(row),
     header: "Meta mensal",
-    cell: ({ row }) => formatKwh(row.original.metaMensal),
+    cell: ({ row }) => formatKwh(metaMensalCalculada(row.original)),
   },
   {
     id: "atingido",
+    accessorFn: (row) => {
+      const total = totalKwh(row.dias);
+      const meta = metaMensalCalculada(row);
+      return meta && meta > 0 ? (total / meta) * 100 : null;
+    },
     header: "% atingido",
     cell: ({ row }) => {
       const total = totalKwh(row.original.dias);
-      const meta = row.original.metaMensal;
+      const meta = metaMensalCalculada(row.original);
       if (!meta || meta === 0) return "—";
       const pct = (total / meta) * 100;
       return (
@@ -103,6 +608,7 @@ const columns: ColumnDef<GeracaoRow, unknown>[] = [
   },
   {
     id: "diasAtivos",
+    accessorFn: (row) => diasComDado(row.dias),
     header: "Dias com dado",
     cell: ({ row }) => `${diasComDado(row.original.dias)} / 31`,
   },
@@ -112,6 +618,7 @@ function renderDetails(g: GeracaoRow) {
   const total = totalKwh(g.dias);
   const ativos = diasComDado(g.dias);
   const media = ativos > 0 ? total / ativos : 0;
+  const metaMensal = metaMensalCalculada(g);
   return (
     <dl>
       <DetailField label="Usina" value={g.usina?.nome ?? g.nomeUsinaRaw} />
@@ -119,6 +626,10 @@ function renderDetails(g: GeracaoRow) {
       <DetailField label="Mês" value={g.mes} />
       <DetailField
         label="Meta mensal"
+        value={metaMensal != null ? `${formatKwh(metaMensal)} kWh` : null}
+      />
+      <DetailField
+        label="Meta diária"
         value={g.metaMensal != null ? `${formatKwh(g.metaMensal)} kWh` : null}
       />
       <DetailField
@@ -218,8 +729,7 @@ function DiasPanel({ geracao }: { geracao: GeracaoRow }) {
   const max = positivos.length ? Math.max(...positivos) : 0;
   const min = positivos.length ? Math.min(...positivos) : 0;
 
-  const metaDiaria =
-    geracao.metaMensal != null ? geracao.metaMensal / 31 : null;
+  const metaDiaria = geracao.metaMensal;
 
   return (
     <div className="flex flex-col gap-4">
@@ -228,7 +738,10 @@ function DiasPanel({ geracao }: { geracao: GeracaoRow }) {
           <Stat label="Total" value={`${formatKwh(total)} kWh`} />
           <Stat label="Média" value={`${formatKwh(media)} kWh`} />
           <Stat label="Máx" value={`${formatKwh(max)} kWh`} />
-          <Stat label="Mín" value={ativos > 0 ? `${formatKwh(min)} kWh` : "—"} />
+          <Stat
+            label="Mín"
+            value={ativos > 0 ? `${formatKwh(min)} kWh` : "—"}
+          />
         </div>
         <div className="ml-3 shrink-0">
           {editing ? (
@@ -342,18 +855,23 @@ interface Props {
 
 export function GeracaoTable({ rows, usinaOptions }: Props) {
   const fields = buildGeracaoFormFields(usinaOptions);
+  const activeRows = useMemo(() => rows.filter((row) => !row.deletedAt), [rows]);
+
   return (
-    <EntityPage<GeracaoRow, typeof geracaoSchema>
-      title="Geração"
-      prismaModel="Geracao"
-      rawFileName="geracao.json"
-      schema={geracaoSchema}
-      fields={fields}
-      rows={rows}
-      columns={columns}
-      actions={actions}
-      details={renderDetails}
-      relations={[diasRelation]}
-    />
+    <div className="flex flex-col gap-4">
+      <GeracaoAnalytics rows={activeRows} />
+      <EntityPage<GeracaoRow, typeof geracaoSchema>
+        title="Geração"
+        prismaModel="Geracao"
+        rawFileName="geracao.json"
+        schema={geracaoSchema}
+        fields={fields}
+        rows={rows}
+        columns={columns}
+        actions={actions}
+        details={renderDetails}
+        relations={[diasRelation]}
+      />
+    </div>
   );
 }
