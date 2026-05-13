@@ -9,10 +9,12 @@
  */
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ExternalLink, Paperclip, Upload, X } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   Controller,
   useForm,
+  useWatch,
+  type Control,
   type DefaultValues,
   type Resolver,
 } from "react-hook-form";
@@ -72,6 +74,18 @@ export interface FormFieldConfig {
    * `option.uc` e `option.municipio` da option selecionada.
    */
   linksTo?: Record<string, string>;
+  /**
+   * Renderização condicional — campo só aparece quando outro campo do form
+   * tem o valor especificado. Quando escondido, valor é limpo (null) pra
+   * evitar lixo no submit. Ex: `{ field: "origem", equals: "fornecedor" }`.
+   */
+  showWhen?: { field: string; equals: string | string[] };
+  /**
+   * Para `select`: mensagem mostrada quando `options` está vazio. Útil pra
+   * orientar "vá cadastrar X primeiro" em vez de mostrar dropdown vazio.
+   * Aceita JSX inline (link, ícone, etc.).
+   */
+  emptyMessage?: React.ReactNode;
 }
 
 export interface EntityFormProps<S extends z.ZodObject> {
@@ -110,6 +124,44 @@ export function EntityForm<S extends z.ZodObject>({
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver, defaultValues });
 
+  // Observa todos os campos referenciados por `showWhen` em qualquer field.
+  // useWatch sem nome retorna o form todo — pega só os campos referenciados
+  // pra minimizar re-renders.
+  const watchedNames = Array.from(
+    new Set(
+      fields
+        .map((f) => f.showWhen?.field)
+        .filter((n): n is string => !!n),
+    ),
+  );
+  const watchedValues = useWatch({
+    control: control as unknown as Control,
+    name: watchedNames as never,
+  }) as unknown[];
+  const watchedMap = Object.fromEntries(
+    watchedNames.map((n, i) => [n, watchedValues[i]]),
+  );
+
+  function fieldVisible(f: FormFieldConfig): boolean {
+    if (!f.showWhen) return true;
+    const current = watchedMap[f.showWhen.field];
+    const expected = f.showWhen.equals;
+    if (Array.isArray(expected)) return expected.includes(current as string);
+    return current === expected;
+  }
+
+  // Quando um campo é escondido, limpa o valor — evita lixo no submit
+  // (ex: usuário escolhe Distribuidora primeiro, preenche distribuidoraId,
+  // muda Origem pra Fornecedor; o distribuidoraId deve sair do payload).
+  useEffect(() => {
+    for (const f of fields) {
+      if (f.showWhen && !fieldVisible(f)) {
+        setValue(f.name as never, null as never, { shouldDirty: false });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(watchedMap)]);
+
   const submit = (values: FormValues) => {
     startTransition(async () => {
       await onSubmit(values);
@@ -124,10 +176,13 @@ export function EntityForm<S extends z.ZodObject>({
       className="grid grid-cols-1 gap-4 sm:grid-cols-2"
     >
       {fields.map((f) => {
+        if (!fieldVisible(f)) return null;
         const errMsg = (
           errors as Record<string, { message?: string } | undefined>
         )[f.name]?.message;
         const colSpan = f.span === 2 ? "sm:col-span-2" : "";
+        const isEmptySelect =
+          f.type === "select" && (f.options?.length ?? 0) === 0;
         return (
           <div key={f.name} className={cn("flex flex-col gap-1.5", colSpan)}>
             <Label htmlFor={f.name}>
@@ -135,9 +190,15 @@ export function EntityForm<S extends z.ZodObject>({
               {f.required && <span className="ml-0.5 text-destructive">*</span>}
             </Label>
 
-            {renderField(f, register, control, setValue)}
+            {isEmptySelect && f.emptyMessage ? (
+              <div className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                {f.emptyMessage}
+              </div>
+            ) : (
+              renderField(f, register, control, setValue)
+            )}
 
-            {f.helpText && !errMsg && (
+            {f.helpText && !errMsg && !isEmptySelect && (
               <p className="text-xs text-muted-foreground">{f.helpText}</p>
             )}
             {errMsg && (

@@ -136,7 +136,9 @@ export function buildTarifaEnergiaFormFields(
         value: f.id,
         label: f.nome ?? f.id,
       })),
-      helpText: "Use somente quando origem = Fornecedor.",
+      showWhen: { field: "origem", equals: "fornecedor" },
+      emptyMessage:
+        "Nenhuma comercializadora cadastrada. Vá em /fornecedores, edite o fornecedor desejado e marque \"Tipo de fornecimento → Comercializadora (vende kWh)\".",
     },
     {
       name: "distribuidoraId",
@@ -148,7 +150,9 @@ export function buildTarifaEnergiaFormFields(
         value: d.id,
         label: [d.nome, d.sigla].filter(Boolean).join(" — ") || d.nome,
       })),
-      helpText: "Use somente quando origem = Distribuidora.",
+      showWhen: { field: "origem", equals: "distribuidora" },
+      emptyMessage:
+        "Nenhuma distribuidora cadastrada. Cadastre Energisa / Copel / Enel em /distribuidoras primeiro.",
     },
     {
       name: "valorPonta",
