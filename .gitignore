@@ -37,6 +37,9 @@ yarn-error.log*
 # raw data dumps from legacy system (kept locally only)
 /data/raw/*
 !/data/raw/.gitkeep
+/data/new-import/
+/data/raw-backups/
+/data/db-backups/
 /data/xlsx-backup/*
 !/data/xlsx-backup/.gitkeep
 
@@ -55,3 +58,18 @@ next-env.d.ts
 # uploads locais (dev). Em produção, R2 — vide .env.example.
 /public/uploads/
 /private-uploads/
+
+# runtime / dev artifacts locais (logs, bancos PGLite, caches de smoke test)
+# Mantidos fora do repo — regenerados a cada execução.
+*.log
+/.pglite-*/
+/.pglite-*.log
+/.prisma-dev-*/
+/.prisma-dev-*.log
+/.next-*.log
+/.next-*.cmd.log
+/.db-live*.log
+/.local-start*.log
+/.localhost-runner*.log
+/.npm-cache/
+/.run-pglite-local.cmd
