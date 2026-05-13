@@ -45,21 +45,68 @@ interface Check {
 }
 
 // Conta linhas em models cujos counts devem bater 1:1 com o JSON fonte.
-const ROW_COUNT_PAIRS: { file: string; model: string; count: (p: PrismaClient) => Promise<number> }[] = [
-  { file: "filiais.json", model: "Filial", count: (p) => p.filial.count() },
-  { file: "usinas.json", model: "Usina", count: (p) => p.usina.count() },
-  { file: "fornecedores.json", model: "Fornecedor", count: (p) => p.fornecedor.count() },
-  { file: "geracao.json", model: "Geracao", count: (p) => p.geracao.count() },
-  { file: "consumo.json", model: "Consumo", count: (p) => p.consumo.count() },
-  { file: "injecao.json", model: "Injecao", count: (p) => p.injecao.count() },
-  { file: "orcamentario.json", model: "Orcamento", count: (p) => p.orcamento.count() },
-  { file: "manutencao_limpeza.json", model: "CronogramaLimpeza", count: (p) => p.cronogramaLimpeza.count() },
-  { file: "manutencao_preventiva.json", model: "ManutencaoPreventiva", count: (p) => p.manutencaoPreventiva.count() },
-  { file: "juridico_processos.json", model: "ProcessoJuridico", count: (p) => p.processoJuridico.count() },
+const ROW_COUNT_PAIRS: {
+  file: string;
+  model: string;
+  count: (p: PrismaClient) => Promise<number>;
+}[] = [
+  {
+    file: "filiais.json",
+    model: "Filial",
+    count: (p) => p.filial.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "usinas.json",
+    model: "Usina",
+    count: (p) => p.usina.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "fornecedores.json",
+    model: "Fornecedor",
+    count: (p) => p.fornecedor.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "geracao.json",
+    model: "Geracao",
+    count: (p) => p.geracao.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "consumo.json",
+    model: "Consumo",
+    count: (p) => p.consumo.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "injecao.json",
+    model: "Injecao",
+    count: (p) => p.injecao.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "orcamentario.json",
+    model: "Orcamento",
+    count: (p) => p.orcamento.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "manutencao_limpeza.json",
+    model: "CronogramaLimpeza",
+    count: (p) => p.cronogramaLimpeza.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "manutencao_preventiva.json",
+    model: "ManutencaoPreventiva",
+    count: (p) => p.manutencaoPreventiva.count({ where: { deletedAt: null } }),
+  },
+  {
+    file: "juridico_processos.json",
+    model: "ProcessoJuridico",
+    count: (p) => p.processoJuridico.count({ where: { deletedAt: null } }),
+  },
 ];
 
 // Stubs: contagens devem ser zero (nenhum dado real ainda).
-const STUB_COUNTS: { model: string; count: (p: PrismaClient) => Promise<number> }[] = [
+const STUB_COUNTS: {
+  model: string;
+  count: (p: PrismaClient) => Promise<number>;
+}[] = [
   { model: "Licenca", count: (p) => p.licenca.count() },
   { model: "ValidacaoFatura", count: (p) => p.validacaoFatura.count() },
   { model: "ItemEstoque", count: (p) => p.itemEstoque.count() },
@@ -93,7 +140,9 @@ async function runActiveChecks(prisma: PrismaClient): Promise<Check[]> {
   // VendaKwh: explosão wide-to-long, counts devem ser ≥ source.
   if (existsSync(path.join(RAW_DIR, "venda_kwh.json"))) {
     const source = (await loadRows("venda_kwh.json")).length;
-    const exploded = await prisma.vendaKwh.count();
+    const exploded = await prisma.vendaKwh.count({
+      where: { deletedAt: null },
+    });
     checks.push({
       label: "VendaKwh explosion",
       ok: exploded >= source,
@@ -102,8 +151,10 @@ async function runActiveChecks(prisma: PrismaClient): Promise<Check[]> {
   }
 
   // GeracaoDia presente?
-  const dias = await prisma.geracaoDia.count();
-  const geracoes = await prisma.geracao.count();
+  const dias = await prisma.geracaoDia.count({
+    where: { geracao: { deletedAt: null } },
+  });
+  const geracoes = await prisma.geracao.count({ where: { deletedAt: null } });
   checks.push({
     label: "GeracaoDia present",
     ok: geracoes === 0 || dias > 0,
@@ -111,8 +162,10 @@ async function runActiveChecks(prisma: PrismaClient): Promise<Check[]> {
   });
 
   // Linkage Usina → Filial (não falha se 0%, mas avisa visualmente).
-  const usinaTotal = await prisma.usina.count();
-  const usinaLinked = await prisma.usina.count({ where: { filialId: { not: null } } });
+  const usinaTotal = await prisma.usina.count({ where: { deletedAt: null } });
+  const usinaLinked = await prisma.usina.count({
+    where: { deletedAt: null, filialId: { not: null } },
+  });
   checks.push({
     label: "Usina → Filial linkage",
     ok: true,
@@ -120,7 +173,9 @@ async function runActiveChecks(prisma: PrismaClient): Promise<Check[]> {
   });
 
   // Linkage Geracao → Usina (esperado 100%).
-  const gerLinked = await prisma.geracao.count({ where: { usinaId: { not: null } } });
+  const gerLinked = await prisma.geracao.count({
+    where: { deletedAt: null, usinaId: { not: null } },
+  });
   checks.push({
     label: "Geracao → Usina linkage",
     ok: geracoes === 0 || gerLinked === geracoes,
@@ -128,7 +183,9 @@ async function runActiveChecks(prisma: PrismaClient): Promise<Check[]> {
   });
 
   // Nulls em campos suspeitos de obrigatórios (Usina.nome, Fornecedor.nome).
-  const usinaSemNome = await prisma.usina.count({ where: { nome: "" } });
+  const usinaSemNome = await prisma.usina.count({
+    where: { deletedAt: null, nome: "" },
+  });
   checks.push({
     label: "Usina.nome populated",
     ok: usinaSemNome === 0,
@@ -136,8 +193,12 @@ async function runActiveChecks(prisma: PrismaClient): Promise<Check[]> {
   });
   // Fornecedor.nome é nullable porque a fonte legada aceita Nome vazio em
   // alguns registros. A checagem é informacional (não falha).
-  const fornSemNome = await prisma.fornecedor.count({ where: { nome: null } });
-  const fornTotal = await prisma.fornecedor.count();
+  const fornSemNome = await prisma.fornecedor.count({
+    where: { deletedAt: null, nome: null },
+  });
+  const fornTotal = await prisma.fornecedor.count({
+    where: { deletedAt: null },
+  });
   checks.push({
     label: "Fornecedor.nome populated",
     ok: true,
@@ -154,7 +215,10 @@ async function runStubChecks(prisma: PrismaClient): Promise<Check[]> {
     checks.push({
       label: `${s.model} (stub)`,
       ok: n === 0, // stubs devem estar vazios; população só vem com JSON real
-      detail: n === 0 ? "tabela existe, vazia ✓" : `inesperadamente populada (${n} linhas)`,
+      detail:
+        n === 0
+          ? "tabela existe, vazia ✓"
+          : `inesperadamente populada (${n} linhas)`,
     });
   }
   return checks;

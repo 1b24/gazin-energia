@@ -82,6 +82,12 @@ function asString(r: Row, k: string): string | null {
   return nullIfEmpty(r[k]);
 }
 
+function normalizeFilialCodigo(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const value = raw.trim();
+  return value.replace(/^(\d+)\.10$/, "$1.1");
+}
+
 function asNumber(r: Row, k: string): number | null {
   return parseLooseNumber(r[k]);
 }
@@ -104,9 +110,33 @@ function asBool(r: Row, k: string): boolean | null {
 }
 
 const UF_VALUES = new Set([
-  "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG",
-  "MS", "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR",
-  "RS", "SC", "SE", "SP", "TO",
+  "AC",
+  "AL",
+  "AM",
+  "AP",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MG",
+  "MS",
+  "MT",
+  "PA",
+  "PB",
+  "PE",
+  "PI",
+  "PR",
+  "RJ",
+  "RN",
+  "RO",
+  "RR",
+  "RS",
+  "SC",
+  "SE",
+  "SP",
+  "TO",
 ]);
 
 function asUF(r: Row, k: string): UF | null {
@@ -183,10 +213,14 @@ function asTipoOrcamento(r: Row, k: string): TipoOrcamento | null {
 interface Stats {
   inserted: number;
   unmatched: { entity: string; lookup: string; raw: string }[];
+  softDeleted?: number;
+  restored?: number;
+  preserved?: number;
 }
 
 const stats: Record<string, Stats> = {};
-const skipped: { model: string; file: string; reason: "stub" | "missing" }[] = [];
+const skipped: { model: string; file: string; reason: "stub" | "missing" }[] =
+  [];
 
 function track(entity: string): Stats {
   stats[entity] ??= { inserted: 0, unmatched: [] };
@@ -202,17 +236,148 @@ function logUnmatched(
   track(entity).unmatched.push({ entity, lookup, raw });
 }
 
+type SoftDeleteDelegate = {
+  findMany(args: {
+    where?: Record<string, unknown>;
+    select?: Record<string, boolean>;
+  }): Promise<ExistingZohoRecord[]>;
+  updateMany(args: {
+    where: Record<string, unknown>;
+    data: { deletedAt: Date | null };
+  }): Promise<{ count: number }>;
+};
+
+type ExistingZohoRecord = {
+  id: string;
+  zohoId: string | null;
+  deletedAt?: Date | null;
+};
+
+function getDelegate(
+  prisma: PrismaClient,
+  model: string,
+): SoftDeleteDelegate | null {
+  const key = (model.charAt(0).toLowerCase() +
+    model.slice(1)) as keyof PrismaClient;
+  const delegate = prisma[key];
+  if (
+    !delegate ||
+    typeof delegate !== "object" ||
+    !("findMany" in delegate) ||
+    !("updateMany" in delegate)
+  ) {
+    return null;
+  }
+  return delegate as unknown as SoftDeleteDelegate;
+}
+
+async function syncSoftDeletes(
+  prisma: PrismaClient,
+  file: string,
+  model: string,
+) {
+  const ids = (await loadJson(file))
+    .map((r) => asString(r, "ID"))
+    .filter((id): id is string => !!id);
+  const delegate = getDelegate(prisma, model);
+  if (!delegate || ids.length === 0) return;
+
+  const existing = await delegate.findMany({
+    where: { zohoId: { in: ids } },
+    select: { id: true, zohoId: true, deletedAt: true },
+  });
+  const manualChanges = await buildManualChangeMap(prisma, model, existing);
+  const preservedZohoIds = new Set(manualChanges.keys());
+  const eligibleRestoreIds = ids.filter((id) => !preservedZohoIds.has(id));
+
+  const restored = await delegate.updateMany({
+    where: {
+      zohoId: { in: eligibleRestoreIds },
+      deletedAt: { not: null },
+    },
+    data: { deletedAt: null },
+  });
+  const softDeleted = await delegate.updateMany({
+    where: {
+      AND: [{ zohoId: { not: null } }, { zohoId: { notIn: ids } }],
+      deletedAt: null,
+    },
+    data: { deletedAt: new Date() },
+  });
+
+  const st = track(model);
+  st.preserved = (st.preserved ?? 0) + preservedZohoIds.size;
+  st.restored = (st.restored ?? 0) + restored.count;
+  st.softDeleted = (st.softDeleted ?? 0) + softDeleted.count;
+}
+
+async function getManuallyChangedEntityIds(
+  prisma: PrismaClient,
+  entityType: string,
+): Promise<Set<string>> {
+  const logs = await prisma.auditLog.findMany({
+    where: {
+      entityType,
+      action: { in: ["update", "soft_delete", "restore"] },
+    },
+    select: { entityId: true },
+    distinct: ["entityId"],
+  });
+  return new Set(logs.map((log) => log.entityId));
+}
+
+async function buildManualChangeMap(
+  prisma: PrismaClient,
+  entityType: string,
+  records: ExistingZohoRecord[],
+): Promise<Map<string, ExistingZohoRecord>> {
+  const changedIds = await getManuallyChangedEntityIds(prisma, entityType);
+  const map = new Map<string, ExistingZohoRecord>();
+  for (const record of records) {
+    if (record.zohoId && changedIds.has(record.id)) {
+      map.set(record.zohoId, record);
+    }
+  }
+  return map;
+}
+
+async function buildModelManualChangeMap(
+  prisma: PrismaClient,
+  entityType: string,
+): Promise<Map<string, ExistingZohoRecord>> {
+  const delegate = getDelegate(prisma, entityType);
+  if (!delegate) return new Map();
+  const existing = await delegate.findMany({
+    where: { zohoId: { not: null } },
+    select: { id: true, zohoId: true, deletedAt: true },
+  });
+  return buildManualChangeMap(prisma, entityType, existing);
+}
+
+function preserveManualChange(
+  entityType: string,
+  manualChanges: Map<string, ExistingZohoRecord> | Set<string>,
+  key: string,
+): boolean {
+  if (!manualChanges.has(key)) return false;
+  const st = track(entityType);
+  st.inserted++;
+  st.preserved = (st.preserved ?? 0) + 1;
+  return true;
+}
+
 // ----------------------------------------------------------------------------
 // Importers — um por entidade ativa.
 // ----------------------------------------------------------------------------
 
 async function importFiliais(prisma: PrismaClient) {
   const rows = await loadJson("filiais.json");
+  const manualChanges = await buildModelManualChangeMap(prisma, "Filial");
   for (const r of rows) {
     const zohoId = asString(r, "ID");
     if (!zohoId) continue;
     const data = {
-      codigo: asString(r, "Filial"),
+      codigo: normalizeFilialCodigo(asString(r, "Filial")),
       cd: asString(r, "CD"),
       mercadoLivre: asString(r, "Mercado_Livre"),
       percentualAbsorcaoUsp: asNumber(r, "Percentual_absor_o_USP"),
@@ -232,6 +397,7 @@ async function importFiliais(prisma: PrismaClient) {
         "Caso_a_filial_n_o_seja_climatizada_informe_aqui_a_data_que_ser_realizada_a_climatiza_o",
       ),
     };
+    if (preserveManualChange("Filial", manualChanges, zohoId)) continue;
     await prisma.filial.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -247,13 +413,27 @@ async function buildFilialCodeMap(prisma: PrismaClient) {
     select: { id: true, codigo: true },
   });
   const map = new Map<string, string>();
-  for (const f of all) if (f.codigo) map.set(f.codigo, f.id);
+  for (const f of all) {
+    if (!f.codigo) continue;
+    map.set(f.codigo, f.id);
+    const normalized = normalizeFilialCodigo(f.codigo);
+    if (normalized) map.set(normalized, f.id);
+  }
   return map;
+}
+
+function resolveFilialId(
+  filialMap: Map<string, string>,
+  raw: string | null | undefined,
+) {
+  const normalized = normalizeFilialCodigo(raw);
+  return normalized ? filialMap.get(normalized) : undefined;
 }
 
 async function importUsinas(prisma: PrismaClient) {
   const rows = await loadJson("usinas.json");
   const filialMap = await buildFilialCodeMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(prisma, "Usina");
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -261,7 +441,7 @@ async function importUsinas(prisma: PrismaClient) {
     if (!zohoId || !nome) continue;
 
     const filialCodigoRaw = asString(r, "Filial");
-    const filialId = filialCodigoRaw ? filialMap.get(filialCodigoRaw) : undefined;
+    const filialId = resolveFilialId(filialMap, filialCodigoRaw);
     if (filialCodigoRaw && !filialId) {
       logUnmatched("Usina", "Filial", filialCodigoRaw);
     }
@@ -290,6 +470,7 @@ async function importUsinas(prisma: PrismaClient) {
       filialCodigoRaw,
     };
 
+    if (preserveManualChange("Usina", manualChanges, zohoId)) continue;
     await prisma.usina.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -323,6 +504,7 @@ function lookupUsina(
 async function importFornecedores(prisma: PrismaClient) {
   const rows = await loadJson("fornecedores.json");
   const filialMap = await buildFilialCodeMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(prisma, "Fornecedor");
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -330,7 +512,7 @@ async function importFornecedores(prisma: PrismaClient) {
     const nome = asString(r, "Nome");
 
     const filialCodigoRaw = asString(r, "Abrang_ncia_filial");
-    const filialId = filialCodigoRaw ? filialMap.get(filialCodigoRaw) : undefined;
+    const filialId = resolveFilialId(filialMap, filialCodigoRaw);
     if (filialCodigoRaw && !filialId) {
       logUnmatched("Fornecedor", "Abrang_ncia_filial", filialCodigoRaw);
     }
@@ -349,6 +531,7 @@ async function importFornecedores(prisma: PrismaClient) {
       abrangenciaFilialRaw: filialCodigoRaw,
     };
 
+    if (preserveManualChange("Fornecedor", manualChanges, zohoId)) continue;
     await prisma.fornecedor.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -361,6 +544,7 @@ async function importFornecedores(prisma: PrismaClient) {
 async function importGeracao(prisma: PrismaClient) {
   const rows = await loadJson("geracao.json");
   const usinaMap = await buildUsinaNameMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(prisma, "Geracao");
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -368,6 +552,7 @@ async function importGeracao(prisma: PrismaClient) {
     const nomeUsinaRaw = asString(r, "Nome_da_usina");
     const usinaId = lookupUsina(usinaMap, nomeUsinaRaw, "Geracao");
 
+    if (preserveManualChange("Geracao", manualChanges, zohoId)) continue;
     const ger = await prisma.geracao.upsert({
       where: { zohoId },
       create: {
@@ -391,9 +576,24 @@ async function importGeracao(prisma: PrismaClient) {
 
     // Single_Line1..Single_Line31 → dias 1..31. `Single_Line` (sem sufixo) é
     // ignorado por não ter semântica documentada.
+    // Correcao Zoho: dia 16 vem em `Single_Line`; dias 21..30 usam
+    // `Single_Line22..31`; dia 31 nao tem campo real neste export.
     for (let dia = 1; dia <= 31; dia++) {
-      const kwh = asNumber(r, `Single_Line${dia}`);
-      if (kwh == null) continue;
+      const field =
+        dia === 16
+          ? "Single_Line"
+          : dia >= 21 && dia <= 30
+            ? `Single_Line${dia + 1}`
+            : dia === 31
+              ? null
+              : `Single_Line${dia}`;
+      const kwh = field ? asNumber(r, field) : null;
+      if (kwh == null) {
+        await prisma.geracaoDia.deleteMany({
+          where: { geracaoId: ger.id, dia },
+        });
+        continue;
+      }
       await prisma.geracaoDia.upsert({
         where: { geracaoId_dia: { geracaoId: ger.id, dia } },
         create: { geracaoId: ger.id, dia, kwh },
@@ -407,7 +607,34 @@ async function importGeracao(prisma: PrismaClient) {
 async function importVendaKwh(prisma: PrismaClient) {
   const rows = await loadJson("venda_kwh.json");
   const usinaMap = await buildUsinaNameMap(prisma);
-  const ABBR = ["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+  const manuallyChangedIds = await getManuallyChangedEntityIds(
+    prisma,
+    "VendaKwh",
+  );
+  const manuallyChangedVendaKeys = new Set(
+    (
+      await prisma.vendaKwh.findMany({
+        where: { id: { in: Array.from(manuallyChangedIds) } },
+        select: { zohoId: true, ano: true, mes: true },
+      })
+    )
+      .filter((row) => row.zohoId)
+      .map((row) => `${row.zohoId}:${row.ano}:${row.mes}`),
+  );
+  const ABBR = [
+    "JAN",
+    "FEV",
+    "MAR",
+    "ABR",
+    "MAI",
+    "JUN",
+    "JUL",
+    "AGO",
+    "SET",
+    "OUT",
+    "NOV",
+    "DEZ",
+  ];
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -431,18 +658,33 @@ async function importVendaKwh(prisma: PrismaClient) {
         const mesNum = mesAbbrPtToNumber(abbr);
         if (!mesNum) continue;
         const mes = String(mesNum).padStart(2, "0");
+        if (
+          preserveManualChange(
+            "VendaKwh",
+            manuallyChangedVendaKeys,
+            `${zohoId}:${year}:${mes}`,
+          )
+        ) {
+          continue;
+        }
         await prisma.vendaKwh.upsert({
           where: { zohoId_ano_mes: { zohoId, ano: year, mes } },
           create: {
-            zohoId, ano: year, mes,
-            kwhVendidos: kwh, valorReais: val,
+            zohoId,
+            ano: year,
+            mes,
+            kwhVendidos: kwh,
+            valorReais: val,
             notaFiscalUrl: notaFiscal,
-            usinaId, nomeUsinaRaw,
+            usinaId,
+            nomeUsinaRaw,
           },
           update: {
-            kwhVendidos: kwh, valorReais: val,
+            kwhVendidos: kwh,
+            valorReais: val,
             notaFiscalUrl: notaFiscal,
-            usinaId, nomeUsinaRaw,
+            usinaId,
+            nomeUsinaRaw,
           },
         });
         track("VendaKwh").inserted++;
@@ -454,13 +696,14 @@ async function importVendaKwh(prisma: PrismaClient) {
 async function importConsumo(prisma: PrismaClient) {
   const rows = await loadJson("consumo.json");
   const filialMap = await buildFilialCodeMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(prisma, "Consumo");
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
     if (!zohoId) continue;
 
     const filialCodigoRaw = asString(r, "Filial");
-    const filialId = filialCodigoRaw ? filialMap.get(filialCodigoRaw) : undefined;
+    const filialId = resolveFilialId(filialMap, filialCodigoRaw);
     if (filialCodigoRaw && !filialId) {
       logUnmatched("Consumo", "Filial", filialCodigoRaw);
     }
@@ -487,6 +730,8 @@ async function importConsumo(prisma: PrismaClient) {
       filialCodigoRaw,
     };
 
+    if (preserveManualChange("Consumo", manualChanges, zohoId)) continue;
+
     await prisma.consumo.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -500,6 +745,7 @@ async function importInjecao(prisma: PrismaClient) {
   const rows = await loadJson("injecao.json");
   const filialMap = await buildFilialCodeMap(prisma);
   const fornecedorMap = await buildFornecedorNameMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(prisma, "Injecao");
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -508,7 +754,7 @@ async function importInjecao(prisma: PrismaClient) {
     const filialCodigoRaw = asString(r, "Filial");
     // Filial bate quando o source tem o código numérico (ex: "10006").
     // Quando é descritivo ("Auto Posto 04900"), filialId fica null.
-    const filialId = filialCodigoRaw ? filialMap.get(filialCodigoRaw) : undefined;
+    const filialId = resolveFilialId(filialMap, filialCodigoRaw);
     if (filialCodigoRaw && !filialId) {
       logUnmatched("Injecao", "Filial", filialCodigoRaw);
     }
@@ -538,6 +784,7 @@ async function importInjecao(prisma: PrismaClient) {
       fornecedorId: fornecedorId ?? null,
       fornecedorRaw,
     };
+    if (preserveManualChange("Injecao", manualChanges, zohoId)) continue;
     await prisma.injecao.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -562,6 +809,7 @@ async function buildFornecedorNameMap(prisma: PrismaClient) {
 async function importOrcamento(prisma: PrismaClient) {
   const rows = await loadJson("orcamentario.json");
   const usinaMap = await buildUsinaNameMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(prisma, "Orcamento");
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -584,6 +832,7 @@ async function importOrcamento(prisma: PrismaClient) {
       nomeUsinaRaw,
     };
 
+    if (preserveManualChange("Orcamento", manualChanges, zohoId)) continue;
     await prisma.orcamento.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -596,15 +845,55 @@ async function importOrcamento(prisma: PrismaClient) {
 async function importLimpeza(prisma: PrismaClient) {
   const rows = await loadJson("manutencao_limpeza.json");
   const usinaMap = await buildUsinaNameMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(
+    prisma,
+    "CronogramaLimpeza",
+  );
 
   // Mapeamento posicional dos 6 slots de limpeza (chaves estranhas no Zoho).
   const SLOTS = [
-    { ordem: 1, data: "Limpeza",    concl: "Data_de_conclus_o",   status: "Status1", foto: "Foto_da_limpeza" },
-    { ordem: 2, data: "Limpeza_2",  concl: "Data_de_conclus_o_2", status: "Status2", foto: "Fotos_da_limpeza_2" },
-    { ordem: 3, data: "Limpeza_3",  concl: "Data_de_conclus_o_3", status: "Status3", foto: "Fotos_da_limpeza_3" },
-    { ordem: 4, data: "Limpeza_21", concl: "Data_de_conclus_o_4", status: "Status4", foto: "Foto_da_limpeza_4" },
-    { ordem: 5, data: "Limpeza_5",  concl: "Data_de_conclus_o_5", status: "",        foto: "Foto_da_limpeza_5" },
-    { ordem: 6, data: "Limpeza_6",  concl: "Data_de_conclus_o_6", status: "",        foto: "" },
+    {
+      ordem: 1,
+      data: "Limpeza",
+      concl: "Data_de_conclus_o",
+      status: "Status1",
+      foto: "Foto_da_limpeza",
+    },
+    {
+      ordem: 2,
+      data: "Limpeza_2",
+      concl: "Data_de_conclus_o_2",
+      status: "Status2",
+      foto: "Fotos_da_limpeza_2",
+    },
+    {
+      ordem: 3,
+      data: "Limpeza_3",
+      concl: "Data_de_conclus_o_3",
+      status: "Status3",
+      foto: "Fotos_da_limpeza_3",
+    },
+    {
+      ordem: 4,
+      data: "Limpeza_21",
+      concl: "Data_de_conclus_o_4",
+      status: "Status4",
+      foto: "Foto_da_limpeza_4",
+    },
+    {
+      ordem: 5,
+      data: "Limpeza_5",
+      concl: "Data_de_conclus_o_5",
+      status: "",
+      foto: "Foto_da_limpeza_5",
+    },
+    {
+      ordem: 6,
+      data: "Limpeza_6",
+      concl: "Data_de_conclus_o_6",
+      status: "",
+      foto: "",
+    },
   ] as const;
 
   for (const r of rows) {
@@ -613,6 +902,9 @@ async function importLimpeza(prisma: PrismaClient) {
     const nomeUsinaRaw = asString(r, "Nome_da_usina1");
     const usinaId = lookupUsina(usinaMap, nomeUsinaRaw, "CronogramaLimpeza");
 
+    if (preserveManualChange("CronogramaLimpeza", manualChanges, zohoId)) {
+      continue;
+    }
     const cronograma = await prisma.cronogramaLimpeza.upsert({
       where: { zohoId },
       create: {
@@ -638,7 +930,12 @@ async function importLimpeza(prisma: PrismaClient) {
       if (!dataPlanejada && !dataConclusao && !status && !fotoUrl) continue;
 
       await prisma.limpezaItem.upsert({
-        where: { cronogramaId_ordem: { cronogramaId: cronograma.id, ordem: slot.ordem } },
+        where: {
+          cronogramaId_ordem: {
+            cronogramaId: cronograma.id,
+            ordem: slot.ordem,
+          },
+        },
         create: {
           cronogramaId: cronograma.id,
           ordem: slot.ordem,
@@ -657,6 +954,10 @@ async function importLimpeza(prisma: PrismaClient) {
 async function importPreventiva(prisma: PrismaClient) {
   const rows = await loadJson("manutencao_preventiva.json");
   const usinaMap = await buildUsinaNameMap(prisma);
+  const manualChanges = await buildModelManualChangeMap(
+    prisma,
+    "ManutencaoPreventiva",
+  );
 
   for (const r of rows) {
     const zohoId = asString(r, "ID");
@@ -675,6 +976,9 @@ async function importPreventiva(prisma: PrismaClient) {
       nomeUsinaRaw,
     };
 
+    if (preserveManualChange("ManutencaoPreventiva", manualChanges, zohoId)) {
+      continue;
+    }
     await prisma.manutencaoPreventiva.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -686,6 +990,10 @@ async function importPreventiva(prisma: PrismaClient) {
 
 async function importProcessos(prisma: PrismaClient) {
   const rows = await loadJson("juridico_processos.json");
+  const manualChanges = await buildModelManualChangeMap(
+    prisma,
+    "ProcessoJuridico",
+  );
   for (const r of rows) {
     const zohoId = asString(r, "ID");
     if (!zohoId) continue;
@@ -700,6 +1008,9 @@ async function importProcessos(prisma: PrismaClient) {
       nomeUsinasRaw: asString(r, "Nome_das_usinas"),
     };
 
+    if (preserveManualChange("ProcessoJuridico", manualChanges, zohoId)) {
+      continue;
+    }
     await prisma.processoJuridico.upsert({
       where: { zohoId },
       create: { zohoId, ...data },
@@ -721,27 +1032,39 @@ interface Step {
 
 // Ordem de dependência: filiais → usinas/fornecedores → resto.
 const STEPS: Step[] = [
-  { file: "filiais.json",                model: "Filial",               fn: importFiliais },
-  { file: "usinas.json",                 model: "Usina",                fn: importUsinas },
-  { file: "fornecedores.json",           model: "Fornecedor",           fn: importFornecedores },
-  { file: "geracao.json",                model: "Geracao",              fn: importGeracao },
-  { file: "venda_kwh.json",              model: "VendaKwh",             fn: importVendaKwh },
-  { file: "consumo.json",                model: "Consumo",              fn: importConsumo },
-  { file: "injecao.json",                model: "Injecao",              fn: importInjecao },
-  { file: "orcamentario.json",           model: "Orcamento",            fn: importOrcamento },
-  { file: "manutencao_limpeza.json",     model: "CronogramaLimpeza",    fn: importLimpeza },
-  { file: "manutencao_preventiva.json",  model: "ManutencaoPreventiva", fn: importPreventiva },
-  { file: "juridico_processos.json",     model: "ProcessoJuridico",     fn: importProcessos },
+  { file: "filiais.json", model: "Filial", fn: importFiliais },
+  { file: "usinas.json", model: "Usina", fn: importUsinas },
+  { file: "fornecedores.json", model: "Fornecedor", fn: importFornecedores },
+  { file: "geracao.json", model: "Geracao", fn: importGeracao },
+  { file: "venda_kwh.json", model: "VendaKwh", fn: importVendaKwh },
+  { file: "consumo.json", model: "Consumo", fn: importConsumo },
+  { file: "injecao.json", model: "Injecao", fn: importInjecao },
+  { file: "orcamentario.json", model: "Orcamento", fn: importOrcamento },
+  {
+    file: "manutencao_limpeza.json",
+    model: "CronogramaLimpeza",
+    fn: importLimpeza,
+  },
+  {
+    file: "manutencao_preventiva.json",
+    model: "ManutencaoPreventiva",
+    fn: importPreventiva,
+  },
+  {
+    file: "juridico_processos.json",
+    model: "ProcessoJuridico",
+    fn: importProcessos,
+  },
 ];
 
 // Stubs que o BRIEF prevê mas ainda não têm JSON. Aparecem no log com `⊘`.
 const STUB_FILES: { file: string; model: string }[] = [
-  { file: "juridico_licencas.json",          model: "Licenca" },
-  { file: "consumo_validacao_fatura.json",   model: "ValidacaoFatura" },
-  { file: "estoque.json",                    model: "ItemEstoque" },
-  { file: "manutencao_consertos.json",       model: "ConsertoEquipamento" },
-  { file: "manutencao_corretiva.json",       model: "ManutencaoCorretiva" },
-  { file: "documentos.json",                 model: "Documento" },
+  { file: "juridico_licencas.json", model: "Licenca" },
+  { file: "consumo_validacao_fatura.json", model: "ValidacaoFatura" },
+  { file: "estoque.json", model: "ItemEstoque" },
+  { file: "manutencao_consertos.json", model: "ConsertoEquipamento" },
+  { file: "manutencao_corretiva.json", model: "ManutencaoCorretiva" },
+  { file: "documentos.json", model: "Documento" },
 ];
 
 export async function runImport(prisma?: PrismaClient): Promise<{
@@ -762,6 +1085,7 @@ export async function runImport(prisma?: PrismaClient): Promise<{
         continue;
       }
       await step.fn(client);
+      await syncSoftDeletes(client, step.file, step.model);
       const inserted = stats[step.model]?.inserted ?? 0;
       console.log(`✓ ${step.file}: ${inserted} registros (${step.model})`);
     }
@@ -798,7 +1122,7 @@ export function printSummary(s: Record<string, Stats>) {
   for (const e of entities) {
     const st = s[e];
     console.log(
-      `  ${e.padEnd(24)} inseridos=${st.inserted}  fk_unmatched=${st.unmatched.length}`,
+      `  ${e.padEnd(24)} inseridos=${st.inserted}  preserved=${st.preserved ?? 0}  soft_deleted=${st.softDeleted ?? 0}  restored=${st.restored ?? 0}  fk_unmatched=${st.unmatched.length}`,
     );
   }
   const allUnmatched = entities.flatMap((e) => s[e].unmatched);
