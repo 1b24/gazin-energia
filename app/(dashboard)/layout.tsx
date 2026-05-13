@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Sidebar } from "@/components/layout/sidebar";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { UserMenu } from "@/components/layout/user-menu";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -31,14 +32,17 @@ export default async function DashboardLayout({
       <div className="flex flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b px-6">
           <Breadcrumbs />
-          {user && (
-            <UserMenu
-              name={user.name ?? null}
-              email={user.email ?? null}
-              role={user.role}
-              filialCodigo={filialCodigo}
-            />
-          )}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            {user && (
+              <UserMenu
+                name={user.name ?? null}
+                email={user.email ?? null}
+                role={user.role}
+                filialCodigo={filialCodigo}
+              />
+            )}
+          </div>
         </header>
         <main className="flex-1 p-6">{children}</main>
       </div>

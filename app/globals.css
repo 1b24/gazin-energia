@@ -128,3 +128,17 @@
     @apply font-sans;
   }
 }
+
+.dashboard-orcado-chart {
+  --dashboard-chart-orcado: oklch(0.5 0.18 255);
+  --dashboard-chart-realizado: oklch(0.55 0.16 155);
+  --dashboard-chart-grid: oklch(0.85 0 0);
+  --dashboard-chart-hover: oklch(0.93 0 0 / 70%);
+}
+
+.dark .dashboard-orcado-chart {
+  --dashboard-chart-orcado: oklch(0.72 0.14 252);
+  --dashboard-chart-realizado: oklch(0.75 0.15 155);
+  --dashboard-chart-grid: oklch(1 0 0 / 18%);
+  --dashboard-chart-hover: oklch(0.32 0 0 / 72%);
+}
