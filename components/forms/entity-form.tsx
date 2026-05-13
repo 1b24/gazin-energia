@@ -68,6 +68,11 @@ export interface FormFieldConfig {
   /** Para `file`: tipos aceitos (atributo `accept` do input). */
   accept?: string;
   /**
+   * Para `currency`: número de casas decimais da máscara (default 2).
+   * Use 4 para tarifas de kWh (R$/kWh com precisão de centavos finos).
+   */
+  decimals?: number;
+  /**
    * Para `select`: ao mudar, copia chaves arbitrárias da option escolhida pra
    * outros campos do form. Ex: `{ uc: "uc", municipio: "municipio" }` →
    * quando este field mudar, o form atualiza `uc` e `municipio` com os valores
@@ -342,7 +347,9 @@ function renderField(
               id={f.name}
               inputMode="decimal"
               value={field.value ?? ""}
-              onChange={(e) => field.onChange(maskCurrencyBR(e.target.value))}
+              onChange={(e) =>
+                field.onChange(maskCurrencyBR(e.target.value, f.decimals))
+              }
               placeholder={f.placeholder ?? "0,00"}
             />
           )}

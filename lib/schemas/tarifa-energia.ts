@@ -159,14 +159,17 @@ export function buildTarifaEnergiaFormFields(
       label: "Valor Ponta (R$/kWh)",
       type: "currency",
       span: 1,
+      decimals: 4,
       placeholder: "0,0000",
-      helpText: "Tarifa no horário de ponta. Use 4 casas decimais.",
+      helpText:
+        "Tarifa no horário de ponta. 4 casas decimais — digite só números, vírgula entra sozinha (ex: 530520 → 0,5305).",
     },
     {
       name: "valorForaPonta",
       label: "Valor Fora Ponta (R$/kWh)",
       type: "currency",
       span: 1,
+      decimals: 4,
       placeholder: "0,0000",
     },
     {

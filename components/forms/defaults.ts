@@ -13,20 +13,21 @@ function formatDateBR(d: Date | string): string {
   return `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}/${dt.getFullYear()}`;
 }
 
-function formatNumberBR(n: number): string {
+function formatNumberBR(n: number, decimals = 2): string {
   return n.toLocaleString("pt-BR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
 }
 
-function formatForField(value: unknown, type: FormFieldConfig["type"]): unknown {
+function formatForField(value: unknown, field: FormFieldConfig): unknown {
+  const type = field.type;
   if (value == null) return type === "boolean" ? false : "";
 
   switch (type) {
     case "currency":
       return typeof value === "number"
-        ? formatNumberBR(value)
+        ? formatNumberBR(value, field.decimals)
         : String(value);
     case "date":
       return value instanceof Date || typeof value === "string"
@@ -56,7 +57,7 @@ export function entityToFormDefaults<T extends Record<string, unknown>>(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const f of fields) {
-    out[f.name] = formatForField(entity[f.name], f.type);
+    out[f.name] = formatForField(entity[f.name], f);
   }
   return out;
 }

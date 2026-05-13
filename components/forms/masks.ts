@@ -7,14 +7,22 @@
  * numérico/Date antes de gravar.
  */
 
-/** "1234,56" → "12,34" / "12345" → "123,45" / "" → "" */
-export function maskCurrencyBR(raw: string): string {
+/**
+ * Máscara de moeda BR com precisão configurável (default 2 decimais).
+ *   maskCurrencyBR("1234")          → "12,34"
+ *   maskCurrencyBR("12345")         → "123,45"
+ *   maskCurrencyBR("530520", 4)     → "53,0520"
+ *   maskCurrencyBR("5305", 4)       → "0,5305"
+ *
+ * Para tarifas de kWh (precisão de frações de centavo), use decimals=4.
+ */
+export function maskCurrencyBR(raw: string, decimals = 2): string {
   const digits = raw.replace(/\D/g, "");
   if (!digits) return "";
-  const padded = digits.padStart(3, "0");
-  const intPart = padded.slice(0, -2).replace(/^0+(?=\d)/, "") || "0";
-  const decPart = padded.slice(-2);
-  // Insere separador de milhar
+  const padded = digits.padStart(decimals + 1, "0");
+  const intPart = padded.slice(0, -decimals).replace(/^0+(?=\d)/, "") || "0";
+  const decPart = padded.slice(-decimals);
+  // Insere separador de milhar na parte inteira
   const intWithSep = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   return `${intWithSep},${decPart}`;
 }
