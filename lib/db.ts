@@ -145,3 +145,39 @@ export function applyCreateScope(
   // user, o create vai falhar no pre-check (userCanAccessId no usinaId).
   return data;
 }
+
+// ----------------------------------------------------------------------------
+// Retry transiente para PGLite — "Server has closed the connection" e
+// "Connection terminated unexpectedly" aparecem quando a socket do PGLite
+// expira/recicla entre requisições do dev server. Não é falha real do banco;
+// uma segunda tentativa imediata costuma passar.
+// ----------------------------------------------------------------------------
+
+const TRANSIENT_CONNECTION_ERRORS = [
+  "Server has closed the connection",
+  "Connection terminated unexpectedly",
+];
+
+function isTransientConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return TRANSIENT_CONNECTION_ERRORS.some((m) => err.message.includes(m));
+}
+
+/**
+ * Executa `operation()` com retry único quando o erro for transiente de
+ * conexão. Se falhar de novo, propaga o erro original.
+ *
+ * Use em queries lidas por páginas/server actions que falham com 500 quando
+ * o PGLite recicla a socket. Mutations em transação NÃO devem ser envolvidas
+ * aqui — re-executar pode duplicar audit/efeitos colaterais.
+ */
+export async function retryClosedConnection<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (err) {
+    if (isTransientConnectionError(err)) return operation();
+    throw err;
+  }
+}

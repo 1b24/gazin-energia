@@ -24,11 +24,7 @@
  *   antes de devolver — gestor_filial/operacional não vê histórico fora do
  *   escopo. Admins veem tudo.
  */
-import type {
-  AuditAction,
-  Prisma,
-  PrismaClient,
-} from "@prisma/client";
+import type { AuditAction, Prisma, PrismaClient } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
 import { prisma, userCanAccessId } from "@/lib/db";
@@ -36,7 +32,10 @@ import { prisma, userCanAccessId } from "@/lib/db";
 /** Cliente Prisma OU transação. Aceito por `recordAudit` para atomicidade. */
 type PrismaLike =
   | PrismaClient
-  | Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
+  | Omit<
+      PrismaClient,
+      "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+    >;
 
 const SENSITIVE_KEY_RE =
   /(^|_|[A-Z])(password|senha|hash|token|secret|accesskey|secretkey|apikey)/i;
@@ -66,6 +65,30 @@ function toJsonValue(v: unknown): Prisma.InputJsonValue | undefined {
 
 export interface AuditActor {
   id: string;
+  email?: string | null;
+}
+
+async function resolveAuditUserId(
+  client: PrismaClient,
+  actor: AuditActor,
+): Promise<string> {
+  const byId = await client.user.findUnique({
+    where: { id: actor.id },
+    select: { id: true },
+  });
+  if (byId) return byId.id;
+
+  if (actor.email) {
+    const byEmail = await client.user.findFirst({
+      where: { email: actor.email, deletedAt: null },
+      select: { id: true },
+    });
+    if (byEmail) return byEmail.id;
+  }
+
+  throw new Error(
+    "Sessão inválida: usuário do audit não existe mais. Faça login novamente.",
+  );
 }
 
 /**
@@ -90,12 +113,13 @@ export async function recordAudit(
   tx?: PrismaLike,
 ): Promise<void> {
   const client = (tx ?? prisma) as PrismaClient;
+  const userId = await resolveAuditUserId(client, params.actor);
   await client.auditLog.create({
     data: {
       entityType: params.entityType,
       entityId: params.entityId,
       action: params.action,
-      userId: params.actor.id,
+      userId,
       before: toJsonValue(sanitize(params.before)),
       after: toJsonValue(sanitize(params.after)),
     },
@@ -133,8 +157,7 @@ export async function loadAuditLogs(
   if (!session?.user) return [];
 
   // RBAC: o viewer pode ver o histórico apenas se enxerga a entidade.
-  const modelLower =
-    entityType.charAt(0).toLowerCase() + entityType.slice(1);
+  const modelLower = entityType.charAt(0).toLowerCase() + entityType.slice(1);
   const ok = await userCanAccessId(session.user, modelLower, entityId);
   if (!ok) return [];
 
