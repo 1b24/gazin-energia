@@ -154,6 +154,10 @@ model Filial {
   uc                        String?
   uc2                       String?
   uc3                       String?
+  /// UCs antigas / canceladas / que migraram — texto livre, sugerimos
+  /// separar por vírgula. Mantido pra rastreabilidade histórica quando
+  /// uma UC sai da operação. Não usado em joins/import; só consulta.
+  ucsHistoricas             String?
   municipio                 String?
   uf                        UF?
   senha                     String?

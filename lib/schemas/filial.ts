@@ -48,6 +48,7 @@ export const filialSchema = z.object({
   uc: z.preprocess(nullishToNull, z.string().nullable()),
   uc2: z.preprocess(nullishToNull, z.string().nullable()),
   uc3: z.preprocess(nullishToNull, z.string().nullable()),
+  ucsHistoricas: z.preprocess(nullishToNull, z.string().nullable()),
   municipio: z.preprocess(nullishToNull, z.string().nullable()),
   uf: z.preprocess(
     (v) => (v == null || v === "" ? null : v),
@@ -129,6 +130,15 @@ export const filialFormFields: FormFieldConfig[] = [
   { name: "uc",            label: "UC principal",    type: "text", span: 1 },
   { name: "uc2",           label: "UC #2",           type: "text", span: 1 },
   { name: "uc3",           label: "UC #3",           type: "text", span: 1 },
+  {
+    name: "ucsHistoricas",
+    label: "UCs históricas",
+    type: "textarea",
+    span: 2,
+    placeholder: "UCs antigas / canceladas separadas por vírgula",
+    helpText:
+      "Texto livre. Use pra guardar UCs que migraram ou foram canceladas — não some do histórico.",
+  },
   { name: "municipio",     label: "Município",       type: "text", span: 1 },
   {
     name: "uf",

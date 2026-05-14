@@ -22,6 +22,7 @@ export default async function FiliaisPage() {
         uc: true,
         uc2: true,
         uc3: true,
+        ucsHistoricas: true,
         municipio: true,
         uf: true,
         usuario: true,

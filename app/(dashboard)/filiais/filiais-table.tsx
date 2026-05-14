@@ -39,6 +39,51 @@ const columns: ColumnDef<FilialRow, unknown>[] = [
     cell: ({ row }) => row.original.mercadoLivre ?? "—",
   },
   {
+    accessorKey: "uc",
+    header: "UC principal",
+    cell: ({ row }) =>
+      row.original.uc ? (
+        <span className="font-mono text-xs">{row.original.uc}</span>
+      ) : (
+        <span className="text-xs text-muted-foreground">—</span>
+      ),
+  },
+  {
+    accessorKey: "uc2",
+    header: "UC #2",
+    cell: ({ row }) =>
+      row.original.uc2 ? (
+        <span className="font-mono text-xs">{row.original.uc2}</span>
+      ) : (
+        <span className="text-xs text-muted-foreground">—</span>
+      ),
+  },
+  {
+    accessorKey: "uc3",
+    header: "UC #3",
+    cell: ({ row }) =>
+      row.original.uc3 ? (
+        <span className="font-mono text-xs">{row.original.uc3}</span>
+      ) : (
+        <span className="text-xs text-muted-foreground">—</span>
+      ),
+  },
+  {
+    accessorKey: "ucsHistoricas",
+    header: "UCs históricas",
+    cell: ({ row }) => {
+      const v = row.original.ucsHistoricas?.trim();
+      if (!v) return <span className="text-xs text-muted-foreground">—</span>;
+      // Truncamento — UCs históricas podem virar texto longo.
+      const short = v.length > 32 ? `${v.slice(0, 30)}…` : v;
+      return (
+        <span className="font-mono text-xs" title={v}>
+          {short}
+        </span>
+      );
+    },
+  },
+  {
     accessorKey: "municipio",
     header: "Município",
     cell: ({ row }) => row.original.municipio ?? "—",
@@ -120,6 +165,7 @@ function renderDetails(f: FilialRow) {
       <DetailField label="UC principal" value={f.uc} />
       <DetailField label="UC #2" value={f.uc2} />
       <DetailField label="UC #3" value={f.uc3} />
+      <DetailField label="UCs históricas" value={f.ucsHistoricas} />
       <DetailField
         label="% Absorção USP"
         value={
@@ -146,6 +192,14 @@ function renderDetails(f: FilialRow) {
   );
 }
 
+// UCs adicionais e históricas escondidas por default — usuário libera no
+// dropdown "Colunas" se precisar visualizar. Mantém a tabela enxuta.
+const HIDDEN_BY_DEFAULT = {
+  uc2: false,
+  uc3: false,
+  ucsHistoricas: false,
+};
+
 export function FiliaisTable({ rows }: { rows: FilialRow[] }) {
   return (
     <EntityPage<FilialRow, typeof filialSchema>
@@ -156,6 +210,7 @@ export function FiliaisTable({ rows }: { rows: FilialRow[] }) {
       fields={filialFormFields}
       rows={rows}
       columns={columns}
+      initialColumnVisibility={HIDDEN_BY_DEFAULT}
       actions={actions}
       details={renderDetails}
     />
