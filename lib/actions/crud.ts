@@ -124,6 +124,62 @@ function delegateFor(
   return delegate;
 }
 
+const UNIQUE_FIELD_LABELS: Record<string, string> = {
+  cnpj: "CNPJ",
+  codigo: "codigo",
+  codigoAneel: "codigo ANEEL",
+  email: "e-mail",
+  nome: "nome",
+  sigla: "sigla",
+  uf: "UF",
+  zohoId: "Zoho ID",
+};
+
+function formatUniqueField(field: string): string {
+  return (
+    UNIQUE_FIELD_LABELS[field] ??
+    field
+      .replace(/Id$/, "")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .toLowerCase()
+  );
+}
+
+function toCrudError(err: unknown): Error {
+  if (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    err.code === "P2002"
+  ) {
+    const target = err.meta?.target;
+    const fields =
+      Array.isArray(target) && target.every((f) => typeof f === "string")
+        ? target.map(formatUniqueField)
+        : typeof target === "string"
+          ? [formatUniqueField(target)]
+          : [];
+
+    if (fields.length === 1) {
+      return new Error(`Ja existe um registro com o mesmo ${fields[0]}.`);
+    }
+    if (fields.length > 1) {
+      return new Error(
+        `Ja existe um registro com a mesma combinacao de ${fields.join(" + ")}.`,
+      );
+    }
+    return new Error("Ja existe um registro com estes dados.");
+  }
+
+  return err instanceof Error ? err : new Error("Falha ao salvar registro.");
+}
+
+async function runCrudMutation<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (err) {
+    throw toCrudError(err);
+  }
+}
+
 export function createCrudActions<S extends z.ZodObject>(
   prismaModel: string,
   schema: S,
@@ -268,12 +324,14 @@ export function createCrudActions<S extends z.ZodObject>(
     let data = schema.parse(input) as Record<string, unknown>;
     data = applyCreateScope(a, modelLower(), data);
 
-    const created = await prisma.$transaction(async (tx) => {
-      const delegate = delegateFor(prismaModel, tx);
-      const c = await delegate.create({ data });
-      await auditInTx(tx, a, "create", c.id, null, c);
-      return c;
-    });
+    const created = await runCrudMutation(() =>
+      prisma.$transaction(async (tx) => {
+        const delegate = delegateFor(prismaModel, tx);
+        const c = await delegate.create({ data });
+        await auditInTx(tx, a, "create", c.id, null, c);
+        return c;
+      }),
+    );
     bustCache();
     await fireHook(a, "create", created.id, null, created);
     return serializePrisma(created);
@@ -286,13 +344,15 @@ export function createCrudActions<S extends z.ZodObject>(
     if (!a) throw new Error("Não autenticado.");
     const data = partialSchema.parse(input);
 
-    const result = await prisma.$transaction(async (tx) => {
-      const delegate = delegateFor(prismaModel, tx);
-      const before = await delegate.findUnique({ where: { id } });
-      const after = await delegate.update({ where: { id }, data });
-      await auditInTx(tx, a, "update", id, before, after);
-      return { before, after };
-    });
+    const result = await runCrudMutation(() =>
+      prisma.$transaction(async (tx) => {
+        const delegate = delegateFor(prismaModel, tx);
+        const before = await delegate.findUnique({ where: { id } });
+        const after = await delegate.update({ where: { id }, data });
+        await auditInTx(tx, a, "update", id, before, after);
+        return { before, after };
+      }),
+    );
     bustCache();
     await fireHook(a, "update", id, result.before, result.after);
     return serializePrisma(result.after);
@@ -325,16 +385,18 @@ export function createCrudActions<S extends z.ZodObject>(
     const a = await actor();
     if (!a) throw new Error("Não autenticado.");
 
-    const result = await prisma.$transaction(async (tx) => {
-      const delegate = delegateFor(prismaModel, tx);
-      const before = await delegate.findUnique({ where: { id } });
-      const after = await delegate.update({
-        where: { id },
-        data: { deletedAt: null },
-      });
-      await auditInTx(tx, a, "restore", id, before, after);
-      return { before, after };
-    });
+    const result = await runCrudMutation(() =>
+      prisma.$transaction(async (tx) => {
+        const delegate = delegateFor(prismaModel, tx);
+        const before = await delegate.findUnique({ where: { id } });
+        const after = await delegate.update({
+          where: { id },
+          data: { deletedAt: null },
+        });
+        await auditInTx(tx, a, "restore", id, before, after);
+        return { before, after };
+      }),
+    );
     bustCache();
     await fireHook(a, "restore", id, result.before, result.after);
     return serializePrisma(result.after);
