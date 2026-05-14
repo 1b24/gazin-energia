@@ -81,13 +81,20 @@ export function configureCrudHooks(hooks: CrudHooks) {
   globalHooks = hooks;
 }
 
-interface CrudOptions {
+interface CrudOptions<S extends z.ZodObject = z.ZodObject> {
   /** Sobrescreve hooks globais para esta entidade. */
   hooks?: CrudHooks;
   /** Default `true`. Stubs ignoram mutate (lança erro). */
   enforceStubBlock?: boolean;
   /** Path(s) a invalidar via `revalidatePath` após qualquer mutação. */
   revalidate?: string | string[];
+  /**
+   * Schema usado pelo `update`. Por default, é `schema.partial()` — funciona
+   * pra schemas planos. Schemas com `.refine()` quebram em `.partial()` (Zod
+   * proíbe), então a entidade pode fornecer um schema base partial aqui.
+   * Recebe input parcial e produz o data que vai pro Prisma.
+   */
+  updateSchema?: S;
 }
 
 // Tipo opaco para o delegate dinâmico do Prisma (`prisma[modelLower]`).
@@ -122,7 +129,36 @@ export function createCrudActions<S extends z.ZodObject>(
   schema: S,
   opts: CrudOptions = {},
 ) {
-  const { enforceStubBlock = true, hooks: localHooks, revalidate } = opts;
+  const {
+    enforceStubBlock = true,
+    hooks: localHooks,
+    revalidate,
+    updateSchema,
+  } = opts;
+
+  /**
+   * Schema usado no Update — preferimos o que vier explícito em `opts`,
+   * senão tenta `schema.partial()`. Em Zod, `.partial()` falha quando o
+   * schema é `ZodObject.refine(...)` (refinements podem depender de campos
+   * que sumiram). Nesse caso, a entidade deve passar `updateSchema`
+   * explicitamente em `opts` (geralmente o objeto base sem o refine).
+   */
+  const partialSchema =
+    updateSchema ??
+    (() => {
+      const anyObj = schema as unknown as { partial?: () => unknown };
+      if (typeof anyObj.partial !== "function") return schema;
+      try {
+        return anyObj.partial() as unknown as z.ZodObject;
+      } catch {
+        // Refinements bloqueiam .partial() — caller precisa fornecer
+        // `updateSchema` em opts. Mensagem clara no servidor.
+        throw new Error(
+          `[crud:${prismaModel}] schema usa .refine() — passe opts.updateSchema ` +
+            "(geralmente o objeto base sem o refine) ao createCrudActions.",
+        );
+      }
+    })();
 
   function bustCache() {
     if (!revalidate) return;
@@ -248,7 +284,7 @@ export function createCrudActions<S extends z.ZodObject>(
     await ensureCanAccess(id);
     const a = await actor();
     if (!a) throw new Error("Não autenticado.");
-    const data = schema.partial().parse(input);
+    const data = partialSchema.parse(input);
 
     const result = await prisma.$transaction(async (tx) => {
       const delegate = delegateFor(prismaModel, tx);

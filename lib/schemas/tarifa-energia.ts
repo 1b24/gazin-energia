@@ -62,27 +62,36 @@ function dateFromBR() {
   }, z.date().nullable());
 }
 
-export const tarifaEnergiaSchema = z
-  .object({
-    origem: z.enum(ORIGEM_VALUES),
-    fornecedorId: z.preprocess(emptyToNull, z.string().nullable()),
-    distribuidoraId: z.preprocess(emptyToNull, z.string().nullable()),
+/**
+ * Schema base SEM refinements — usado pelo update partial (Zod proíbe
+ * `.partial()` em schemas com refine). O `tarifaEnergiaSchema` exportado
+ * abaixo adiciona os 3 refinements em cima do base. Update usa o
+ * `tarifaEnergiaPartialSchema` (base.partial()), e o caller fica
+ * responsável por garantir consistência semântica via UI.
+ */
+const tarifaEnergiaBaseSchema = z.object({
+  origem: z.enum(ORIGEM_VALUES),
+  fornecedorId: z.preprocess(emptyToNull, z.string().nullable()),
+  distribuidoraId: z.preprocess(emptyToNull, z.string().nullable()),
 
-    valorPonta: decimal4FromBR(),
-    valorForaPonta: decimal4FromBR(),
+  valorPonta: decimal4FromBR(),
+  valorForaPonta: decimal4FromBR(),
 
-    vigenciaInicio: dateFromBR().refine((v) => v != null, {
-      message: "Vigência início obrigatória",
-    }),
-    vigenciaFim: dateFromBR(),
+  vigenciaInicio: dateFromBR().refine((v) => v != null, {
+    message: "Vigência início obrigatória",
+  }),
+  vigenciaFim: dateFromBR(),
 
-    classeTensao: z.preprocess(
-      (v) => (v == null || v === "" ? null : v),
-      z.enum(CLASSE_TENSAO_VALUES).nullable(),
-    ),
-    modalidade: z.preprocess(nullishToNull, z.string().nullable()),
-    observacao: z.preprocess(nullishToNull, z.string().nullable()),
-  })
+  classeTensao: z.preprocess(
+    (v) => (v == null || v === "" ? null : v),
+    z.enum(CLASSE_TENSAO_VALUES).nullable(),
+  ),
+  modalidade: z.preprocess(nullishToNull, z.string().nullable()),
+  observacao: z.preprocess(nullishToNull, z.string().nullable()),
+});
+
+/** Schema completo com regras de consistência — usado no Create. */
+export const tarifaEnergiaSchema = tarifaEnergiaBaseSchema
   .refine(
     (data) => {
       if (data.origem === "fornecedor") {
@@ -115,6 +124,9 @@ export const tarifaEnergiaSchema = z
       path: ["vigenciaFim"],
     },
   );
+
+/** Schema partial pro Update — base sem refines. Aceita campos parciais. */
+export const tarifaEnergiaPartialSchema = tarifaEnergiaBaseSchema.partial();
 
 export type TarifaEnergiaInput = z.infer<typeof tarifaEnergiaSchema>;
 
