@@ -8,11 +8,33 @@
  * Prisma aceita (digits-only, number, Date).
  */
 import { z } from "zod";
-import { UF } from "@prisma/client";
+import { ClasseTensao, UF } from "@prisma/client";
 
 import type { FormFieldConfig } from "@/components/forms/entity-form";
 
 const UF_VALUES = Object.values(UF) as [UF, ...UF[]];
+const CLASSE_TENSAO_VALUES = Object.values(ClasseTensao) as [
+  ClasseTensao,
+  ...ClasseTensao[],
+];
+
+/**
+ * Labels humanos para classes de tensão — usado em selects e na
+ * formatação na tabela. Mantém alinhado com o enum Prisma.
+ */
+export const CLASSE_TENSAO_LABEL: Record<ClasseTensao, string> = {
+  A1: "A1 (≥ 230 kV)",
+  A2: "A2 (88-138 kV)",
+  A3: "A3 (69 kV)",
+  A3a: "A3a (30-44 kV)",
+  A4: "A4 (2,3-25 kV)",
+  AS: "AS (subterrâneo)",
+  B1: "B1 (residencial)",
+  B2: "B2 (rural)",
+  B3: "B3 (comercial/industrial)",
+  B3_optante: "B3 Optante (tarifa horária do A)",
+  B4: "B4 (iluminação pública)",
+};
 
 // `nullishToNull`: trata "", null, undefined como null. Usado pra strings opcionais.
 function nullishToNull(s: string | null | undefined) {
@@ -36,6 +58,10 @@ export const filialSchema = z.object({
   grupo: z.preprocess(nullishToNull, z.string().nullable()),
   distribuidora: z.preprocess(nullishToNull, z.string().nullable()),
   filialClimatizada: z.preprocess(nullishToNull, z.string().nullable()),
+  classeTensao: z.preprocess(
+    (v) => (v == null || v === "" ? null : v),
+    z.enum(CLASSE_TENSAO_VALUES).nullable(),
+  ),
 
   // CNPJ — aceita formatado ("12.345.678/0001-90") ou só dígitos. Salva digits-only.
   cnpj: z
@@ -87,6 +113,19 @@ export const filialFormFields: FormFieldConfig[] = [
   { name: "cnpj",          label: "CNPJ",            type: "cnpj", span: 1 },
   { name: "distribuidora", label: "Distribuidora",   type: "text", span: 1, placeholder: "Energisa - RO..." },
   { name: "grupo",         label: "Grupo Tarifário", type: "text", span: 1, placeholder: "Alta tensão" },
+  {
+    name: "classeTensao",
+    label: "Classe de tensão",
+    type: "select",
+    span: 2,
+    options: CLASSE_TENSAO_VALUES.map((c) => ({
+      value: c,
+      label: CLASSE_TENSAO_LABEL[c],
+    })),
+    placeholder: "Selecione a classe (opcional)...",
+    helpText:
+      "Usado pra cruzar com tarifas da distribuidora — A4 paga diferente de B3.",
+  },
   { name: "uc",            label: "UC principal",    type: "text", span: 1 },
   { name: "uc2",           label: "UC #2",           type: "text", span: 1 },
   { name: "uc3",           label: "UC #3",           type: "text", span: 1 },

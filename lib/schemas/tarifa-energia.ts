@@ -7,16 +7,22 @@
  * (Prisma não tem CHECK condicional nativo).
  */
 import { z } from "zod";
-import { OrigemTarifa } from "@prisma/client";
+import { ClasseTensao, OrigemTarifa } from "@prisma/client";
 
 import type { FormFieldConfig } from "@/components/forms/entity-form";
 
 import type { DistribuidoraPickerOption } from "./distribuidora";
+import { CLASSE_TENSAO_LABEL } from "./filial";
 import type { FornecedorPickerOption } from "./injecao";
 
 const ORIGEM_VALUES = Object.values(OrigemTarifa) as [
   OrigemTarifa,
   ...OrigemTarifa[],
+];
+
+const CLASSE_TENSAO_VALUES = Object.values(ClasseTensao) as [
+  ClasseTensao,
+  ...ClasseTensao[],
 ];
 
 function nullishToNull(s: string | null | undefined) {
@@ -70,6 +76,10 @@ export const tarifaEnergiaSchema = z
     }),
     vigenciaFim: dateFromBR(),
 
+    classeTensao: z.preprocess(
+      (v) => (v == null || v === "" ? null : v),
+      z.enum(CLASSE_TENSAO_VALUES).nullable(),
+    ),
     modalidade: z.preprocess(nullishToNull, z.string().nullable()),
     observacao: z.preprocess(nullishToNull, z.string().nullable()),
   })
@@ -185,6 +195,19 @@ export function buildTarifaEnergiaFormFields(
       type: "date",
       span: 1,
       helpText: "Deixe em branco se ainda vigente.",
+    },
+    {
+      name: "classeTensao",
+      label: "Classe de tensão",
+      type: "select",
+      span: 1,
+      options: CLASSE_TENSAO_VALUES.map((c) => ({
+        value: c,
+        label: CLASSE_TENSAO_LABEL[c],
+      })),
+      placeholder: "Selecione (opcional)...",
+      helpText:
+        "Quando preenchido, essa tarifa só aplica a UCs da mesma classe. Vazio = tarifa genérica.",
     },
     {
       name: "modalidade",

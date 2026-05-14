@@ -49,7 +49,10 @@ import type { Serialized } from "@/lib/serialize";
 import * as actions from "./actions";
 
 export type InjecaoRow = Serialized<Injecao> & {
-  filial: Pick<Filial, "id" | "codigo" | "mercadoLivre" | "uf"> | null;
+  filial: Pick<
+    Filial,
+    "id" | "codigo" | "mercadoLivre" | "uf" | "classeTensao"
+  > | null;
   fornecedor: Pick<Fornecedor, "id" | "nome"> | null;
 };
 
@@ -124,6 +127,7 @@ export interface TarifaDistribuidoraSerialized {
   valorForaPonta: number | null;
   vigenciaInicio: string;
   vigenciaFim: string | null;
+  classeTensao: string | null;
 }
 
 /** Motivo pelo qual uma linha não entrou no cálculo de economia. */
@@ -132,6 +136,7 @@ type SkipReason =
   | "sem_periodo"
   | "sem_tarifa_uf"
   | "vigencia_fora"
+  | "classe_nao_bate"
   | "tarifa_vazia";
 
 interface SkippedComparison {
@@ -146,6 +151,7 @@ const SKIP_REASON_LABEL: Record<SkipReason, string> = {
   sem_periodo: "Período inválido",
   sem_tarifa_uf: "Sem tarifa pra UF",
   vigencia_fora: "Vigência não cobre data",
+  classe_nao_bate: "Classe de tensão não bate",
   tarifa_vazia: "Tarifa sem valores",
 };
 
@@ -180,6 +186,7 @@ function InjecaoAnalytics({
         valorForaPonta: t.valorForaPonta,
         vigenciaInicio: new Date(t.vigenciaInicio),
         vigenciaFim: t.vigenciaFim ? new Date(t.vigenciaFim) : null,
+        classeTensao: t.classeTensao,
       })),
     [tarifasDistribuidoras],
   );
@@ -239,8 +246,33 @@ function InjecaoAnalytics({
         });
         continue;
       }
-      const tarifa = findTarifaPorData(tarifasUF, uf, refDate);
+      const classeTensao = row.filial?.classeTensao ?? null;
+      const tarifa = findTarifaPorData(
+        tarifasUF,
+        uf,
+        refDate,
+        classeTensao,
+      );
       if (!tarifa) {
+        // Se há tarifa pra UF + vigência mas a classe não bate, isso é
+        // distinto de "vigência não cobre". Detectar pra mostrar motivo certo.
+        const tarifasNaVigencia = tarifasUF.filter(
+          (t) =>
+            t.vigenciaInicio.getTime() <= refDate.getTime() &&
+            (t.vigenciaFim == null ||
+              t.vigenciaFim.getTime() >= refDate.getTime()),
+        );
+        if (tarifasNaVigencia.length > 0 && classeTensao) {
+          skipped.push({
+            rowId: row.id,
+            label: rowLabel,
+            reason: "classe_nao_bate",
+            detail: `Filial é ${classeTensao} mas só há tarifa(s) ${tarifasNaVigencia
+              .map((t) => t.classeTensao ?? "genérica")
+              .join(", ")} pra ${uf}/${row.mes}`,
+          });
+          continue;
+        }
         skipped.push({
           rowId: row.id,
           label: rowLabel,

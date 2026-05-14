@@ -12,7 +12,16 @@ export default async function GeracaoPage() {
     retryClosedConnection(() =>
       db.geracao.findMany({
         include: {
-          usina: { select: { id: true, nome: true, uf: true } },
+          usina: {
+            select: {
+              id: true,
+              nome: true,
+              uf: true,
+              // Pega classeTensao da Filial da Usina pra usar no lookup
+              // de tarifa (Geração não tem classe própria).
+              filial: { select: { classeTensao: true } },
+            },
+          },
           dias: { orderBy: { dia: "asc" } },
         },
         orderBy: [{ ano: "desc" }, { usinaId: "asc" }],
@@ -39,6 +48,7 @@ export default async function GeracaoPage() {
           valorForaPonta: true,
           vigenciaInicio: true,
           vigenciaFim: true,
+          classeTensao: true,
           distribuidora: { select: { uf: true } },
         },
       }),
@@ -52,6 +62,7 @@ export default async function GeracaoPage() {
       valorForaPonta: number | null;
       vigenciaInicio: Date;
       vigenciaFim: Date | null;
+      classeTensao: string | null;
       distribuidora: { uf: string | null } | null;
     }>
   )
@@ -62,6 +73,7 @@ export default async function GeracaoPage() {
       valorForaPonta: t.valorForaPonta,
       vigenciaInicio: t.vigenciaInicio.toISOString(),
       vigenciaFim: t.vigenciaFim ? t.vigenciaFim.toISOString() : null,
+      classeTensao: t.classeTensao,
     }));
 
   return (

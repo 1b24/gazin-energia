@@ -105,6 +105,16 @@ const columns: ColumnDef<TarifaRow, unknown>[] = [
     ),
   },
   {
+    accessorKey: "classeTensao",
+    header: "Classe",
+    cell: ({ row }) =>
+      row.original.classeTensao ? (
+        <Badge variant="secondary">{row.original.classeTensao}</Badge>
+      ) : (
+        <span className="text-xs text-muted-foreground">genérica</span>
+      ),
+  },
+  {
     accessorKey: "modalidade",
     header: "Modalidade",
     cell: ({ row }) =>
@@ -142,6 +152,10 @@ function renderDetails(t: TarifaRow) {
       <DetailField
         label="Vigência fim"
         value={t.vigenciaFim ? fmtDate(t.vigenciaFim) : "vigente"}
+      />
+      <DetailField
+        label="Classe de tensão"
+        value={t.classeTensao ?? "genérica (aceita qualquer classe)"}
       />
       <DetailField label="Modalidade" value={t.modalidade} />
       <DetailField label="Observação" value={t.observacao} />

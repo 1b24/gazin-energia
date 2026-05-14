@@ -8,7 +8,7 @@
  *  - aba "Dias" no drawer com grade 1..31 editável (Pencil → input).
  */
 import type { ColumnDef } from "@tanstack/react-table";
-import type { Geracao, GeracaoDia, Usina } from "@prisma/client";
+import type { ClasseTensao, Geracao, GeracaoDia, Usina } from "@prisma/client";
 import {
   AlertTriangle,
   BarChart3,
@@ -56,7 +56,11 @@ import type { Serialized } from "@/lib/serialize";
 import * as actions from "./actions";
 
 export type GeracaoRow = Serialized<Geracao> & {
-  usina: Pick<Usina, "id" | "nome" | "uf"> | null;
+  usina:
+    | (Pick<Usina, "id" | "nome" | "uf"> & {
+        filial: { classeTensao: ClasseTensao | null } | null;
+      })
+    | null;
   dias: Serialized<GeracaoDia>[];
 };
 
@@ -139,6 +143,7 @@ export interface TarifaDistribuidoraSerialized {
   valorForaPonta: number | null;
   vigenciaInicio: string;
   vigenciaFim: string | null;
+  classeTensao: string | null;
 }
 
 /** Motivo pelo qual uma linha não entrou no cálculo de receita evitada. */
@@ -147,6 +152,7 @@ type SkipReason =
   | "sem_periodo"
   | "sem_tarifa_uf"
   | "vigencia_fora"
+  | "classe_nao_bate"
   | "tarifa_vazia"
   | "sem_geracao";
 
@@ -162,6 +168,7 @@ const SKIP_REASON_LABEL: Record<SkipReason, string> = {
   sem_periodo: "Período inválido",
   sem_tarifa_uf: "Sem tarifa pra UF",
   vigencia_fora: "Vigência não cobre data",
+  classe_nao_bate: "Classe de tensão não bate",
   tarifa_vazia: "Tarifa sem valores",
   sem_geracao: "Nenhum kWh gerado",
 };
@@ -196,6 +203,7 @@ function GeracaoAnalytics({
         valorForaPonta: t.valorForaPonta,
         vigenciaInicio: new Date(t.vigenciaInicio),
         vigenciaFim: t.vigenciaFim ? new Date(t.vigenciaFim) : null,
+        classeTensao: t.classeTensao,
       })),
     [tarifasDistribuidoras],
   );
@@ -246,8 +254,31 @@ function GeracaoAnalytics({
         });
         continue;
       }
-      const tarifa = findTarifaPorData(tarifasUF, uf, refDate);
+      const classeTensao = row.usina?.filial?.classeTensao ?? null;
+      const tarifa = findTarifaPorData(
+        tarifasUF,
+        uf,
+        refDate,
+        classeTensao,
+      );
       if (!tarifa) {
+        const tarifasNaVigencia = tarifasUF.filter(
+          (t) =>
+            t.vigenciaInicio.getTime() <= refDate.getTime() &&
+            (t.vigenciaFim == null ||
+              t.vigenciaFim.getTime() >= refDate.getTime()),
+        );
+        if (tarifasNaVigencia.length > 0 && classeTensao) {
+          skipped.push({
+            rowId: row.id,
+            label: rowLabel,
+            reason: "classe_nao_bate",
+            detail: `Filial da usina é ${classeTensao} mas só há tarifa(s) ${tarifasNaVigencia
+              .map((t) => t.classeTensao ?? "genérica")
+              .join(", ")} pra ${uf}/${row.mes}`,
+          });
+          continue;
+        }
         skipped.push({
           rowId: row.id,
           label: rowLabel,

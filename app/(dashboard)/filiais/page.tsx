@@ -30,6 +30,7 @@ export default async function FiliaisPage() {
         cnpj: true,
         filialClimatizada: true,
         dataClimatizacaoPlanejada: true,
+        classeTensao: true,
         createdAt: true,
         updatedAt: true,
         deletedAt: true,

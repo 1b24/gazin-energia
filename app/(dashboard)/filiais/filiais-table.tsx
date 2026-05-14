@@ -64,6 +64,16 @@ const columns: ColumnDef<FilialRow, unknown>[] = [
     cell: ({ row }) => row.original.grupo ?? "—",
   },
   {
+    accessorKey: "classeTensao",
+    header: "Classe tensão",
+    cell: ({ row }) =>
+      row.original.classeTensao ? (
+        <Badge variant="secondary">{row.original.classeTensao}</Badge>
+      ) : (
+        <span className="text-xs text-muted-foreground">—</span>
+      ),
+  },
+  {
     accessorKey: "cnpj",
     header: "CNPJ",
     cell: ({ row }) =>
@@ -102,6 +112,7 @@ function renderDetails(f: FilialRow) {
       <DetailField label="UF" value={f.uf} />
       <DetailField label="Grupo Tarifário" value={f.grupo} />
       <DetailField label="Distribuidora" value={f.distribuidora} />
+      <DetailField label="Classe de tensão" value={f.classeTensao} />
       <DetailField
         label="CNPJ"
         value={f.cnpj ? formatCNPJ(f.cnpj) : null}

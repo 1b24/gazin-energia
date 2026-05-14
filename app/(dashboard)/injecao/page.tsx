@@ -12,7 +12,13 @@ export default async function InjecaoPage() {
     db.injecao.findMany({
       include: {
         filial: {
-          select: { id: true, codigo: true, mercadoLivre: true, uf: true },
+          select: {
+            id: true,
+            codigo: true,
+            mercadoLivre: true,
+            uf: true,
+            classeTensao: true,
+          },
         },
         fornecedor: { select: { id: true, nome: true } },
       },
@@ -34,6 +40,7 @@ export default async function InjecaoPage() {
         valorForaPonta: true,
         vigenciaInicio: true,
         vigenciaFim: true,
+        classeTensao: true,
         distribuidora: { select: { uf: true } },
       },
     }),
@@ -70,6 +77,7 @@ export default async function InjecaoPage() {
       valorForaPonta: number | null;
       vigenciaInicio: Date;
       vigenciaFim: Date | null;
+      classeTensao: string | null;
       distribuidora: { uf: string | null } | null;
     }>
   )
@@ -80,6 +88,7 @@ export default async function InjecaoPage() {
       valorForaPonta: t.valorForaPonta,
       vigenciaInicio: t.vigenciaInicio.toISOString(),
       vigenciaFim: t.vigenciaFim ? t.vigenciaFim.toISOString() : null,
+      classeTensao: t.classeTensao,
     }));
 
   return (

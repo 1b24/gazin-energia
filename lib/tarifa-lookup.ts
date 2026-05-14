@@ -19,34 +19,54 @@ export interface TarifaSnapshot {
   vigenciaInicio: Date;
   /** null = tarifa ainda vigente. */
   vigenciaFim: Date | null;
+  /**
+   * Classe tarifária da ANEEL (A4, B3, B3 optante etc) à qual essa tarifa
+   * se aplica. null = tarifa "genérica" sem restrição por classe.
+   */
+  classeTensao?: string | null;
 }
 
 /**
- * Acha a tarifa de uma UF que cobria `refDate`. Quando há mais de uma
- * candidata (sobreposição de vigências), retorna a com `vigenciaInicio`
- * mais recente — assume que reajustes mais novos prevalecem.
+ * Acha a tarifa cobrindo `refDate` para uma UF + classe de tensão.
  *
- * Retorna `null` quando não há tarifa cadastrada na UF, ou nenhuma cobre
- * a data informada (cadastro de tarifa anterior à vigência registrada).
+ * Regra de match com `classeTensao`:
+ *   - Quando ambos `classeTensao` (param) e `t.classeTensao` (registro)
+ *     são preenchidos → exige match exato.
+ *   - Quando o param é null/undefined (UC sem classe cadastrada) → aceita
+ *     qualquer tarifa, preferindo a genérica (sem classe).
+ *   - Quando o registro é null (tarifa genérica) → aceita pra qualquer
+ *     classe — funciona como fallback histórico.
+ *
+ * Em sobreposição de vigência, retorna a com `vigenciaInicio` mais recente.
+ * Quando há candidatas com e sem classe específica, a com classe específica
+ * vence (mais precisa).
  */
 export function findTarifaPorData(
   tarifas: TarifaSnapshot[],
   uf: string | null | undefined,
   refDate: Date,
+  classeTensao?: string | null,
 ): TarifaSnapshot | null {
   if (!uf) return null;
   const refMs = refDate.getTime();
-  const candidates = tarifas.filter(
-    (t) =>
-      t.uf === uf &&
-      t.vigenciaInicio.getTime() <= refMs &&
-      (t.vigenciaFim == null || t.vigenciaFim.getTime() >= refMs),
-  );
+  const candidates = tarifas.filter((t) => {
+    if (t.uf !== uf) return false;
+    if (t.vigenciaInicio.getTime() > refMs) return false;
+    if (t.vigenciaFim != null && t.vigenciaFim.getTime() < refMs) return false;
+    // Match de classe — só rejeita se ambos preenchidos e diferentes.
+    if (classeTensao && t.classeTensao && classeTensao !== t.classeTensao) {
+      return false;
+    }
+    return true;
+  });
   if (candidates.length === 0) return null;
-  // Mais recente primeiro (reajuste novo prevalece).
-  candidates.sort(
-    (a, b) => b.vigenciaInicio.getTime() - a.vigenciaInicio.getTime(),
-  );
+  // Ordena: classe específica antes da genérica; depois vigência mais recente.
+  candidates.sort((a, b) => {
+    const aHasClass = a.classeTensao ? 1 : 0;
+    const bHasClass = b.classeTensao ? 1 : 0;
+    if (aHasClass !== bHasClass) return bHasClass - aHasClass;
+    return b.vigenciaInicio.getTime() - a.vigenciaInicio.getTime();
+  });
   return candidates[0];
 }
 

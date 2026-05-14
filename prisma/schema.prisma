@@ -112,6 +112,31 @@ enum TipoFornecimento {
   outro
 }
 
+/// Classe de tensão (subgrupo tarifário ANEEL). Determina a estrutura de
+/// tarifa cobrada pela distribuidora — A4 paga diferente de B3, B3 optante
+/// usa estrutura horária do Grupo A. Crítico no lookup tarifa↔fatura.
+///
+/// Grupo A (alta tensão, ≥ 2,3 kV) — modalidades verde/azul aplicáveis:
+///   A1 (≥ 230 kV), A2 (88-138 kV), A3 (69 kV), A3a (30-44 kV),
+///   A4 (2,3-25 kV), AS (subterrâneo).
+///
+/// Grupo B (baixa tensão, < 2,3 kV) — tarifa convencional/branca:
+///   B1 (residencial), B2 (rural), B3 (comercial/industrial),
+///   B3_optante (B3 que escolheu tarifa horária do Grupo A), B4 (ilum. pública).
+enum ClasseTensao {
+  A1
+  A2
+  A3
+  A3a
+  A4
+  AS
+  B1
+  B2
+  B3
+  B3_optante
+  B4
+}
+
 // =============================================================================
 // CORE
 // =============================================================================
@@ -136,6 +161,9 @@ model Filial {
   grupo                     String?
   distribuidora             String?
   cnpj                      String?
+  /// Classe de tensão da UC — usada no lookup de tarifa pra match com a
+  /// estrutura tarifária correta da distribuidora (B3 vs A4 etc).
+  classeTensao              ClasseTensao?
   filialClimatizada         String?
   dataClimatizacaoPlanejada DateTime?
 
@@ -706,6 +734,11 @@ model TarifaEnergia {
   /// null = tarifa atual. Preencher quando uma tarifa nova entrar em vigor.
   vigenciaFim    DateTime?
 
+  /// Classe de tensão à qual essa tarifa se aplica. Quando preenchido, o
+  /// lookup só usa essa tarifa pra UCs da mesma classe. Quando null,
+  /// funciona como tarifa "genérica" pra UCs sem classe cadastrada.
+  classeTensao ClasseTensao?
+
   /// Específico de distribuidora — verde / azul / convencional / branca.
   /// Para fornecedor (mercado livre) costuma ficar null.
   modalidade String?
@@ -719,6 +752,7 @@ model TarifaEnergia {
   @@index([origem])
   @@index([fornecedorId])
   @@index([distribuidoraId])
+  @@index([classeTensao])
   @@index([vigenciaInicio])
   @@index([deletedAt])
 }

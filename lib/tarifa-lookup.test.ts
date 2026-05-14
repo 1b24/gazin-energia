@@ -90,6 +90,84 @@ describe("findTarifaPorData", () => {
   });
 });
 
+describe("findTarifaPorData — match por classe de tensão", () => {
+  const energisaB3: TarifaSnapshot = {
+    uf: "MS",
+    valorPonta: 1.5,
+    valorForaPonta: 0.8,
+    vigenciaInicio: new Date(2026, 0, 1),
+    vigenciaFim: null,
+    classeTensao: "B3",
+  };
+  const energisaA4: TarifaSnapshot = {
+    uf: "MS",
+    valorPonta: 0.9,
+    valorForaPonta: 0.5,
+    vigenciaInicio: new Date(2026, 0, 1),
+    vigenciaFim: null,
+    classeTensao: "A4",
+  };
+  const energisaGenerica: TarifaSnapshot = {
+    uf: "MS",
+    valorPonta: 1.2,
+    valorForaPonta: 0.6,
+    vigenciaInicio: new Date(2026, 0, 1),
+    vigenciaFim: null,
+    classeTensao: null, // genérica
+  };
+
+  it("filial B3 + tarifa B3 → match exato", () => {
+    const t = findTarifaPorData(
+      [energisaB3, energisaA4],
+      "MS",
+      new Date(2026, 5, 1),
+      "B3",
+    );
+    expect(t?.valorPonta).toBe(1.5);
+  });
+
+  it("filial B3 + tarifa A4 + nenhuma B3 → null (rejeita classe diferente)", () => {
+    const t = findTarifaPorData(
+      [energisaA4],
+      "MS",
+      new Date(2026, 5, 1),
+      "B3",
+    );
+    expect(t).toBeNull();
+  });
+
+  it("filial sem classe + tarifa B3 → aceita (filial não restringiu)", () => {
+    const t = findTarifaPorData(
+      [energisaB3],
+      "MS",
+      new Date(2026, 5, 1),
+      null,
+    );
+    expect(t?.valorPonta).toBe(1.5);
+  });
+
+  it("filial B3 + tarifa genérica → aceita (tarifa não restringiu)", () => {
+    const t = findTarifaPorData(
+      [energisaGenerica],
+      "MS",
+      new Date(2026, 5, 1),
+      "B3",
+    );
+    expect(t?.valorPonta).toBe(1.2);
+  });
+
+  it("prefere tarifa com classe específica sobre genérica", () => {
+    const t = findTarifaPorData(
+      [energisaGenerica, energisaB3],
+      "MS",
+      new Date(2026, 5, 1),
+      "B3",
+    );
+    expect(t?.valorPonta).toBe(1.5); // a B3 vence
+    expect(t?.classeTensao).toBe("B3");
+  });
+});
+
 describe("refDateFromAnoMes", () => {
   it("retorna último dia do mês pt-BR", () => {
     const d = refDateFromAnoMes(2026, "Março");
