@@ -7,7 +7,6 @@
  * e passa o `schema` Zod pra validação. O form usa React Hook Form +
  * `@hookform/resolvers/zod`. Suporta `create` e `edit` via prop `defaultValues`.
  */
-import { zodResolver } from "@hookform/resolvers/zod";
 import { ExternalLink, Paperclip, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import {
@@ -114,18 +113,41 @@ export function EntityForm<S extends z.ZodObject>({
   cancelLabel = "Cancelar",
 }: EntityFormProps<S>) {
   const [pending, startTransition] = useTransition();
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // zodResolver + Zod 4 + RHF 7: as discrepâncias de tipos internos não são
-  // expressáveis sem cast — a validação real continua a cargo do Zod em runtime.
+  // Resolver custom — `zodResolver` do `@hookform/resolvers` engasga com
+  // `z.preprocess` no schema raiz em Zod 4 (retorna `{ values: undefined,
+  // errors: {} }`, RHF interpreta como falha sem campo apontado). Aqui
+  // chamamos `safeParse` direto e mapeamos issues pra shape do RHF.
   type FormValues = z.infer<S>;
-  const resolver = zodResolver(
-    schema as unknown as Parameters<typeof zodResolver>[0],
-  ) as unknown as Resolver<FormValues>;
+  const resolver: Resolver<FormValues> = async (rawValues) => {
+    const parsed = (
+      schema as unknown as {
+        safeParse: (v: unknown) => {
+          success: boolean;
+          data?: unknown;
+          error?: { issues?: Array<{ path: (string | number)[]; message: string }> };
+        };
+      }
+    ).safeParse(rawValues);
+    if (parsed.success) {
+      return { values: parsed.data as FormValues, errors: {} };
+    }
+    const errs: Record<string, { type: string; message: string }> = {};
+    for (const issue of parsed.error?.issues ?? []) {
+      const key = (issue.path?.[0] as string) ?? "_root";
+      // Mantém a primeira mensagem por campo — RHF não acumula múltiplos
+      // erros por field no shape simples.
+      if (!errs[key]) errs[key] = { type: "zod", message: issue.message };
+    }
+    return { values: {}, errors: errs as never };
+  };
   const {
     control,
     register,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver, defaultValues });
 
@@ -168,18 +190,69 @@ export function EntityForm<S extends z.ZodObject>({
   }, [JSON.stringify(watchedMap)]);
 
   const submit = (values: FormValues) => {
+    setSubmitError(null);
     startTransition(async () => {
-      await onSubmit(values);
+      try {
+        await onSubmit(values);
+      } catch (err) {
+        setSubmitError(
+          err instanceof Error ? err.message : "Falha ao salvar registro.",
+        );
+      }
     });
+  };
+
+  // Callback de erro do handleSubmit — sem isso, RHF cancela o submit em
+  // silêncio quando Zod rejeita um campo (inclusive campos não renderizados,
+  // ex: `senha` no schema de Filial mas fora do form). Mostra o nome e o
+  // motivo do(s) campo(s) que travaram, em vez de "botão não faz nada".
+  const onInvalid = (errs: typeof errors) => {
+    const detalhes = Object.entries(errs)
+      .map(
+        ([k, v]) =>
+          `${k}: ${(v as { message?: string } | undefined)?.message ?? "inválido"}`,
+      )
+      .join(" · ");
+    // Quando RHF chama onInvalid com errors vazio, normalmente é o resolver
+    // engasgando — rodamos schema.safeParse direto pra extrair o erro real.
+    if (typeof window !== "undefined") {
+      const values = getValues();
+      // eslint-disable-next-line no-console
+      console.error("[entity-form] validation failed:", errs);
+      // eslint-disable-next-line no-console
+      console.error("[entity-form] values at failure:", values);
+      const parsed = (
+        schema as unknown as { safeParse: (v: unknown) => unknown }
+      ).safeParse(values) as { success: boolean; error?: unknown };
+      // eslint-disable-next-line no-console
+      console.error("[entity-form] direct schema.safeParse:", parsed);
+      if (!parsed.success) {
+        setSubmitError(
+          `Erro de validação — ${JSON.stringify(parsed.error, null, 2)}`,
+        );
+        return;
+      }
+    }
+    setSubmitError(
+      detalhes
+        ? `Erro de validação — ${detalhes}`
+        : "Erro de validação no formulário.",
+    );
   };
 
   const busy = pending || isSubmitting;
 
   return (
     <form
-      onSubmit={handleSubmit(submit)}
+      onSubmit={handleSubmit(submit, onInvalid)}
       className="grid grid-cols-1 gap-4 sm:grid-cols-2"
     >
+      {submitError && (
+        <div className="sm:col-span-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {submitError}
+        </div>
+      )}
+
       {fields.map((f) => {
         if (!fieldVisible(f)) return null;
         const errMsg = (

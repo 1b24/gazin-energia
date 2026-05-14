@@ -53,7 +53,13 @@ export const filialSchema = z.object({
     (v) => (v == null || v === "" ? null : v),
     z.enum(UF_VALUES).nullable(),
   ),
-  senha: z.preprocess(nullishToNull, z.string().nullable()),
+  // `senha` fica fora do form genérico (credencial do portal da distribuidora,
+  // não pode trafegar pelo payload de lista). RHF nunca registra esse field,
+  // então o submit não inclui a chave → chega como `undefined`. Em Zod 4,
+  // `z.preprocess(fn, inner)` retorna `ZodPipe` e o `z.object` pai NÃO
+  // propaga a optionality do inner — precisa `.optional()` no wrapper
+  // externo pra a chave ser considerada opcional no objeto.
+  senha: z.preprocess(nullishToNull, z.string().nullable()).optional(),
   usuario: z.preprocess(nullishToNull, z.string().nullable()),
   grupo: z.preprocess(nullishToNull, z.string().nullable()),
   distribuidora: z.preprocess(nullishToNull, z.string().nullable()),
