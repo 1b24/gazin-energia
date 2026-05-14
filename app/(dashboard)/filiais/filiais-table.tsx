@@ -69,21 +69,6 @@ const columns: ColumnDef<FilialRow, unknown>[] = [
       ),
   },
   {
-    accessorKey: "ucsHistoricas",
-    header: "UCs históricas",
-    cell: ({ row }) => {
-      const v = row.original.ucsHistoricas?.trim();
-      if (!v) return <span className="text-xs text-muted-foreground">—</span>;
-      // Truncamento — UCs históricas podem virar texto longo.
-      const short = v.length > 32 ? `${v.slice(0, 30)}…` : v;
-      return (
-        <span className="font-mono text-xs" title={v}>
-          {short}
-        </span>
-      );
-    },
-  },
-  {
     accessorKey: "municipio",
     header: "Município",
     cell: ({ row }) => row.original.municipio ?? "—",
@@ -165,7 +150,6 @@ function renderDetails(f: FilialRow) {
       <DetailField label="UC principal" value={f.uc} />
       <DetailField label="UC #2" value={f.uc2} />
       <DetailField label="UC #3" value={f.uc3} />
-      <DetailField label="UCs históricas" value={f.ucsHistoricas} />
       <DetailField
         label="% Absorção USP"
         value={
@@ -192,12 +176,11 @@ function renderDetails(f: FilialRow) {
   );
 }
 
-// UCs adicionais e históricas escondidas por default — usuário libera no
-// dropdown "Colunas" se precisar visualizar. Mantém a tabela enxuta.
+// UC #2 e #3 escondidas por default — usuário libera no dropdown
+// "Colunas" se precisar visualizar. Mantém a tabela enxuta.
 const HIDDEN_BY_DEFAULT = {
   uc2: false,
   uc3: false,
-  ucsHistoricas: false,
 };
 
 export function FiliaisTable({ rows }: { rows: FilialRow[] }) {
