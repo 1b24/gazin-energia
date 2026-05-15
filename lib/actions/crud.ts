@@ -43,7 +43,11 @@ import { z } from "zod";
 export { flattenRelations, isSensitiveKey, SENSITIVE_FIELD_PATTERN };
 
 import { auth } from "@/lib/auth";
-import { recordAudit } from "@/lib/audit";
+import {
+  recordAudit,
+  recordAuditByUserId,
+  resolveAuditUserId,
+} from "@/lib/audit";
 import {
   applyCreateScope,
   prisma,
@@ -279,7 +283,23 @@ export function createCrudActions<S extends z.ZodObject>(
     entityId: string,
     before: unknown,
     after: unknown,
+    auditUserId?: string,
   ) {
+    if (auditUserId) {
+      await recordAuditByUserId(
+        {
+          userId: auditUserId,
+          entityType: prismaModel,
+          entityId,
+          action,
+          before,
+          after,
+        },
+        tx as never,
+      );
+      return;
+    }
+
     await recordAudit(
       {
         actor: { id: actorVal.id, email: actorVal.email },
@@ -444,7 +464,116 @@ export function createCrudActions<S extends z.ZodObject>(
     return exportRows(flat, format, prismaModel.toLowerCase());
   }
 
-  return { create, update, softDelete, restore, bulkDelete, bulkExport };
+  /**
+   * Aplica em lote uma série de creates/updates já validados pela camada
+   * de cima (ex: parser de import Excel). All-or-nothing: roda tudo dentro
+   * de UMA `$transaction` — se qualquer linha falhar, nada persiste.
+   *
+   * Cada operação:
+   *  - re-valida `data` via `schema` (create) ou `partialSchema` (update),
+   *    pra blindar contra payload manipulado por quem chama;
+   *  - grava audit dentro da mesma tx (igual a create/update normais);
+   *  - respeita RBAC: create aplica `applyCreateScope`, update exige
+   *    `userCanAccessId` antes de tocar.
+   *
+   * Não roda hooks externos (`fireHook`) — esses são best-effort fora da
+   * tx; importação em lote prioriza consistência transacional.
+   */
+  async function bulkApply(
+    operations: Array<
+      | { kind: "create"; data: unknown }
+      | { kind: "update"; id: string; data: unknown }
+    >,
+  ): Promise<{ created: number; updated: number }> {
+    ensureNotStub();
+    const a = await actor();
+    if (!a) throw new Error("Não autenticado.");
+    const lowerModel = modelLower();
+    const auditUserId = await resolveAuditUserId({
+      id: a.id,
+      email: a.email,
+    });
+
+    const prepared = operations.map((op) => {
+      if (op.kind === "create") {
+        const data = applyCreateScope(
+          a,
+          lowerModel,
+          schema.parse(op.data) as Record<string, unknown>,
+        );
+        return { kind: "create" as const, data };
+      }
+
+      return {
+        kind: "update" as const,
+        id: op.id,
+        data: partialSchema.parse(op.data),
+      };
+    });
+
+    // Pre-check RBAC pra updates fora da tx (falha rápido, sem rollback).
+    for (const op of prepared) {
+      if (op.kind === "update") {
+        const ok = await userCanAccessId(a, lowerModel, op.id);
+        if (!ok) {
+          throw new Error(
+            `Não autorizado: registro ${op.id} fora do escopo do usuário.`,
+          );
+        }
+      }
+    }
+
+    return runCrudMutation(() =>
+      prisma.$transaction(
+        async (tx) => {
+          const delegate = delegateFor(prismaModel, tx);
+          let created = 0;
+          let updated = 0;
+          for (const op of prepared) {
+            if (op.kind === "create") {
+              const c = await delegate.create({ data: op.data });
+              await auditInTx(tx, a, "create", c.id, null, c, auditUserId);
+              created++;
+            } else {
+              const before = await delegate.findUnique({ where: { id: op.id } });
+              if (!before) {
+                throw new Error(`Registro ${op.id} não encontrado.`);
+              }
+              const after = await delegate.update({
+                where: { id: op.id },
+                data: op.data,
+              });
+              await auditInTx(
+                tx,
+                a,
+                "update",
+                op.id,
+                before,
+                after,
+                auditUserId,
+              );
+              updated++;
+            }
+          }
+          return { created, updated };
+        },
+        { maxWait: 10000, timeout: 30000 },
+      ),
+    ).then((result) => {
+      bustCache();
+      return result;
+    });
+  }
+
+  return {
+    create,
+    update,
+    softDelete,
+    restore,
+    bulkDelete,
+    bulkExport,
+    bulkApply,
+  };
 }
 
 // ---------------------------------------------------------------------------
