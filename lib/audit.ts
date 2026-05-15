@@ -68,18 +68,19 @@ export interface AuditActor {
   email?: string | null;
 }
 
-async function resolveAuditUserId(
-  client: PrismaClient,
+export async function resolveAuditUserId(
   actor: AuditActor,
+  client: PrismaLike = prisma,
 ): Promise<string> {
-  const byId = await client.user.findUnique({
+  const db = client as PrismaClient;
+  const byId = await db.user.findUnique({
     where: { id: actor.id },
     select: { id: true },
   });
   if (byId) return byId.id;
 
   if (actor.email) {
-    const byEmail = await client.user.findFirst({
+    const byEmail = await db.user.findFirst({
       where: { email: actor.email, deletedAt: null },
       select: { id: true },
     });
@@ -89,6 +90,31 @@ async function resolveAuditUserId(
   throw new Error(
     "Sessão inválida: usuário do audit não existe mais. Faça login novamente.",
   );
+}
+
+type RecordAuditPayload = {
+  entityType: string;
+  entityId: string;
+  action: AuditAction;
+  before?: unknown;
+  after?: unknown;
+};
+
+export async function recordAuditByUserId(
+  params: RecordAuditPayload & { userId: string },
+  tx?: PrismaLike,
+): Promise<void> {
+  const client = (tx ?? prisma) as PrismaClient;
+  await client.auditLog.create({
+    data: {
+      entityType: params.entityType,
+      entityId: params.entityId,
+      action: params.action,
+      userId: params.userId,
+      before: toJsonValue(sanitize(params.before)),
+      after: toJsonValue(sanitize(params.after)),
+    },
+  });
 }
 
 /**
@@ -102,28 +128,24 @@ async function resolveAuditUserId(
  * stack normalmente — sem catch silencioso.
  */
 export async function recordAudit(
-  params: {
+  params: RecordAuditPayload & {
     actor: AuditActor;
-    entityType: string;
-    entityId: string;
-    action: AuditAction;
-    before?: unknown;
-    after?: unknown;
   },
   tx?: PrismaLike,
 ): Promise<void> {
   const client = (tx ?? prisma) as PrismaClient;
-  const userId = await resolveAuditUserId(client, params.actor);
-  await client.auditLog.create({
-    data: {
+  const userId = await resolveAuditUserId(params.actor, client);
+  await recordAuditByUserId(
+    {
+      userId,
       entityType: params.entityType,
       entityId: params.entityId,
       action: params.action,
-      userId,
-      before: toJsonValue(sanitize(params.before)),
-      after: toJsonValue(sanitize(params.after)),
+      before: params.before,
+      after: params.after,
     },
-  });
+    client,
+  );
 }
 
 // ---------------------------------------------------------------------------
