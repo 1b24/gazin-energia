@@ -9,12 +9,18 @@ import {
   Bolt,
   Building2,
   DatabaseZap,
+  FileSpreadsheet,
   Gauge,
   Paperclip,
   Receipt,
+  Upload,
   Zap,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState, useTransition } from "react";
+
+import { Button } from "@/components/ui/button";
+
+import { ConsumoImportDialog } from "./import-dialog";
 
 import { Bar } from "@/components/analytics/bar";
 import { EmptyAnalytics } from "@/components/analytics/empty-state";
@@ -801,6 +807,24 @@ interface Props {
 export function ConsumoTable({ rows, filialOptions }: Props) {
   const fields = buildConsumoFormFields(filialOptions);
   const activeRows = useMemo(() => rows.filter((row) => !row.deletedAt), [rows]);
+  const [importOpen, setImportOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  // Download do modelo oficial (XLSX em PT-BR com colunas ID/Filial ID ocultas).
+  function handleDownloadModel() {
+    startTransition(async () => {
+      const payload = await actions.exportConsumoModel();
+      const blob = new Blob([payload.buffer], { type: payload.mimetype });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = payload.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -816,7 +840,31 @@ export function ConsumoTable({ rows, filialOptions }: Props) {
         initialColumnVisibility={HIDDEN_BY_DEFAULT}
         actions={actions}
         details={renderDetails}
+        toolbarExtras={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadModel}
+              disabled={pending}
+              title="Baixa um Excel preenchido com os consumos atuais — use como modelo pra editar e reimportar."
+            >
+              <FileSpreadsheet className="mr-1 h-4 w-4" />
+              Baixar modelo
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setImportOpen(true)}
+              disabled={pending}
+            >
+              <Upload className="mr-1 h-4 w-4" />
+              Importar Excel
+            </Button>
+          </>
+        }
       />
+      <ConsumoImportDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }
