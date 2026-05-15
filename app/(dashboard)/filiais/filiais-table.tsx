@@ -9,15 +9,19 @@
  */
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Filial } from "@prisma/client";
+import { FileSpreadsheet, Upload } from "lucide-react";
+import { useState, useTransition } from "react";
 
 import type { Serialized } from "@/lib/serialize";
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatCNPJ } from "@/lib/format";
 import { filialFormFields, filialSchema } from "@/lib/schemas/filial";
 
 import * as actions from "./actions";
+import { FilialImportDialog } from "./import-dialog";
 
 // `Serialized<Filial>` reflete a passagem por `serializePrisma()` em page.tsx
 // (Decimal → number, demais tipos preservados).
@@ -184,18 +188,65 @@ const HIDDEN_BY_DEFAULT = {
 };
 
 export function FiliaisTable({ rows }: { rows: FilialRow[] }) {
+  const [importOpen, setImportOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  // Export do "modelo oficial" — XLSX em PT-BR com coluna ID oculta. Vive
+  // separado do dropdown genérico "Exportar" (JSON/CSV/XLSX cru) porque tem
+  // semântica de "baixar pra editar e reimportar".
+  function handleDownloadModel() {
+    startTransition(async () => {
+      const payload = await actions.exportFilialModel();
+      const blob = new Blob([payload.buffer], { type: payload.mimetype });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = payload.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
+
   return (
-    <EntityPage<FilialRow, typeof filialSchema>
-      title="Filiais"
-      prismaModel="Filial"
-      rawFileName="filiais.json"
-      schema={filialSchema}
-      fields={filialFormFields}
-      rows={rows}
-      columns={columns}
-      initialColumnVisibility={HIDDEN_BY_DEFAULT}
-      actions={actions}
-      details={renderDetails}
-    />
+    <>
+      <EntityPage<FilialRow, typeof filialSchema>
+        title="Filiais"
+        prismaModel="Filial"
+        rawFileName="filiais.json"
+        schema={filialSchema}
+        fields={filialFormFields}
+        rows={rows}
+        columns={columns}
+        initialColumnVisibility={HIDDEN_BY_DEFAULT}
+        actions={actions}
+        details={renderDetails}
+        toolbarExtras={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadModel}
+              disabled={pending}
+              title="Baixa um Excel preenchido com os dados atuais — use como modelo pra editar e reimportar."
+            >
+              <FileSpreadsheet className="mr-1 h-4 w-4" />
+              Baixar modelo
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setImportOpen(true)}
+              disabled={pending}
+            >
+              <Upload className="mr-1 h-4 w-4" />
+              Importar Excel
+            </Button>
+          </>
+        }
+      />
+      <FilialImportDialog open={importOpen} onOpenChange={setImportOpen} />
+    </>
   );
 }
