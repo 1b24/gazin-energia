@@ -82,6 +82,12 @@ export interface EntityPageProps<
   relations?: EntityRelation<T>[];
   /** Visibilidade inicial por coluna; usuário pode toggleá-las em "Colunas". */
   initialColumnVisibility?: VisibilityState;
+  /**
+   * Slot opcional pra ações extras no header da toolbar (ex: importar Excel
+   * em entidades específicas). Renderizado antes do dropdown "Exportar".
+   * Mantém EntityPage agnóstica — só Filial usa isso hoje.
+   */
+  toolbarExtras?: ReactNode;
 }
 
 export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
@@ -99,6 +105,7 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
     details,
     relations,
     initialColumnVisibility,
+    toolbarExtras,
   } = props;
 
   if (isStub(prismaModel)) {
@@ -122,6 +129,7 @@ export function EntityPage<T extends { id: string }, S extends z.ZodObject>(
       details={details}
       relations={relations}
       initialColumnVisibility={initialColumnVisibility}
+      toolbarExtras={toolbarExtras}
     />
   );
 }
@@ -139,6 +147,7 @@ interface ActiveProps<T extends { id: string }, S extends z.ZodObject> {
   details?: (entity: T) => ReactNode;
   relations?: EntityRelation<T>[];
   initialColumnVisibility?: VisibilityState;
+  toolbarExtras?: ReactNode;
 }
 
 function ActiveEntityPage<
@@ -155,6 +164,7 @@ function ActiveEntityPage<
   details,
   relations,
   initialColumnVisibility,
+  toolbarExtras,
 }: ActiveProps<T, S>) {
   const [showArchived, setShowArchived] = useState(false);
   const [drawerEntity, setDrawerEntity] = useState<T | null>(null);
@@ -279,6 +289,7 @@ function ActiveEntityPage<
                 Mostrar arquivados
               </Label>
             </div>
+            {toolbarExtras}
             {actions?.bulkExport && (
               <DropdownMenu>
                 <DropdownMenuTrigger
