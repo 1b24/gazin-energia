@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 // Prisma 7 dropped the legacy `datasources` constructor option. Direct Postgres
@@ -161,9 +161,41 @@ const TRANSIENT_CONNECTION_ERRORS = [
   "Server has closed the connection",
   "Connection terminated unexpectedly",
   "Connection terminated",
+  // node-postgres / pg socket errors que vazam pela borda do Prisma:
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EPIPE",
+  "read ECONNRESET",
+  "socket hang up",
 ];
 
+/**
+ * Códigos de erro do Prisma que indicam falha de conexão transiente.
+ * Referência: https://www.prisma.io/docs/reference/api-reference/error-reference
+ *  - P1xxx: família de erros de conexão (can't-reach, timeout, TLS, server-closed).
+ *  - P2024: Timed out fetching a new connection from the connection pool.
+ *
+ * `isTransientConnectionError` trata `code.startsWith("P1")` + P2024 como
+ * família transiente; não mantemos allowlist fechada porque novos códigos
+ * P1xxx em versões futuras seriam falsos negativos.
+ */
+
 function isTransientConnectionError(err: unknown): boolean {
+  // Match por código Prisma — qualquer P1xxx é erro de conexão por contrato:
+  // P1001..P1017 cobrem can't-reach, timeout, TLS, server-closed. Vale
+  // tratar a família inteira como transiente em dev — falso positivo apenas
+  // tenta de novo, falso negativo vaza erro pro UI (pior).
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code.startsWith("P1") || err.code === "P2024") return true;
+  }
+  // Erros "Unknown" do Prisma frequentemente são socket errors do driver pg
+  // que escaparam sem código atribuído. Vale tratar como transiente.
+  if (err instanceof Prisma.PrismaClientUnknownRequestError) return true;
+  // PrismaClientInitializationError tipicamente é conexão (P1001/P1002 etc).
+  if (err instanceof Prisma.PrismaClientInitializationError) return true;
+  // PrismaClientRustPanicError também — adapter-pg às vezes panic em socket morta.
+  if (err instanceof Prisma.PrismaClientRustPanicError) return true;
+  // Fallback: match por mensagem (drivers que vazam direto sem wrap).
   if (!(err instanceof Error)) return false;
   return TRANSIENT_CONNECTION_ERRORS.some((m) => err.message.includes(m));
 }
@@ -193,12 +225,20 @@ export async function retryClosedConnection<T>(
 ): Promise<T> {
   // Tentativas "baratas" — sem mexer no pool global.
   const cheapDelays = [0, 100, 300];
+  let lastErr: unknown;
   for (const delay of cheapDelays) {
     if (delay > 0) await sleep(delay);
     try {
       return await operation();
     } catch (err) {
-      if (!isTransientConnectionError(err)) throw err;
+      lastErr = err;
+      if (!isTransientConnectionError(err)) {
+        // Loga uma vez no servidor antes de propagar — útil pra diagnosticar
+        // erros NÃO-transientes que vazam pra UI sem retry. Aparece no
+        // terminal do `npm run dev`.
+        logUnhandledDbError(err);
+        throw err;
+      }
       // Erro transiente — continua pra próxima tentativa.
     }
   }
@@ -214,5 +254,38 @@ export async function retryClosedConnection<T>(
     // ignora — se o disconnect falhou, a próxima operação reconecta sozinha.
   }
   await sleep(500);
-  return operation();
+  try {
+    return await operation();
+  } catch (err) {
+    // Esgotou as 4 tentativas. Loga contexto pra diagnóstico antes de propagar.
+    logUnhandledDbError(err, { afterRetries: true, firstError: lastErr });
+    throw err;
+  }
+}
+
+function logUnhandledDbError(
+  err: unknown,
+  ctx: { afterRetries?: boolean; firstError?: unknown } = {},
+) {
+  if (typeof process === "undefined" || process.env.NODE_ENV === "test") return;
+  const summary = {
+    afterRetries: !!ctx.afterRetries,
+    name: err instanceof Error ? err.constructor.name : typeof err,
+    code:
+      err instanceof Prisma.PrismaClientKnownRequestError
+        ? err.code
+        : err instanceof Prisma.PrismaClientInitializationError
+          ? err.errorCode
+          : undefined,
+    message: err instanceof Error ? err.message.slice(0, 200) : String(err),
+    firstErrorName:
+      ctx.firstError instanceof Error
+        ? ctx.firstError.constructor.name
+        : undefined,
+    firstErrorCode:
+      ctx.firstError instanceof Prisma.PrismaClientKnownRequestError
+        ? ctx.firstError.code
+        : undefined,
+  };
+  console.error("[retryClosedConnection] unhandled DB error:", summary);
 }
