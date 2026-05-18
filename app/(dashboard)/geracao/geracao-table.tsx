@@ -25,7 +25,16 @@ import { useMemo, useState, useTransition } from "react";
 
 import { Bar } from "@/components/analytics/bar";
 import { EmptyAnalytics } from "@/components/analytics/empty-state";
+import {
+  GeracaoDiariaChart,
+  type DailySeries,
+} from "@/components/analytics/geracao-diaria-chart";
 import { MetricCard } from "@/components/analytics/metric-card";
+import {
+  MonthCalendarSelector,
+  formatSelectedDays,
+  type ReferencePeriod,
+} from "@/components/analytics/month-calendar-selector";
 import {
   DetailField,
   type EntityRelation,
@@ -95,23 +104,68 @@ function diasNoMes(
   return new Date(ano, mesIdx + 1, 0).getDate();
 }
 
-function periodSort(
-  a: { ano: number; mesIdx: number },
-  b: { ano: number; mesIdx: number },
-) {
-  return a.ano - b.ano || a.mesIdx - b.mesIdx;
-}
-
+/**
+ * Wrappers "mensais" — chamados pelas colunas/drawer (fora do contexto do
+ * filtro global de dias). Equivalem a passar `new Set()` aos calculadores
+ * filtrados. Evita propagar `selectedDays` por todo lugar — só o analytics
+ * precisa do filtro global; tabela/drawer mostra valor do registro inteiro.
+ */
+const EMPTY_DAYS: ReadonlySet<number> = new Set();
 function metaMensalCalculada(g: GeracaoRow): number | null {
-  if (g.metaMensal == null) return null;
-  return g.metaMensal * diasNoMes(g.ano, g.mes);
+  return metaCalculada(g, EMPTY_DAYS as Set<number>);
 }
 
-function estimativaMensal(g: GeracaoRow): number {
+/** Soma kWh respeitando filtro de dias. Set vazio = mês inteiro. */
+function kwhFiltered(
+  dias: GeracaoRow["dias"],
+  selectedDays: Set<number>,
+): number {
+  if (selectedDays.size === 0) return totalKwh(dias);
+  let total = 0;
+  for (const d of dias) {
+    if (d.kwh != null && selectedDays.has(d.dia)) total += d.kwh;
+  }
+  return total;
+}
+
+/**
+ * Meta proporcional aos dias selecionados. Sem seleção: extrapolação mensal
+ * (meta diária × dias do mês). Com seleção: meta diária × dias selecionados.
+ */
+function metaCalculada(
+  g: GeracaoRow,
+  selectedDays: Set<number>,
+): number | null {
+  if (g.metaMensal == null) return null;
+  const count =
+    selectedDays.size === 0 ? diasNoMes(g.ano, g.mes) : selectedDays.size;
+  return g.metaMensal * count;
+}
+
+/**
+ * Estimativa de geração — projeção pela MÉDIA DIÁRIA DO MÊS, escalada pela
+ * janela selecionada. A base (média) sempre vem do mês inteiro; a seleção
+ * apenas controla quantos dias a projeção cobre.
+ *
+ *  - Sem seleção: avg × diasNoMes (igual ao realizado projetado).
+ *  - Com seleção: avg × count(diasSelecionados).
+ *
+ * Implicação importante: selecionar UM dia sem dado (ex: dia 13) NÃO zera
+ * o estimado — vai mostrar a média diária do mês. É essa a intenção:
+ * "se esse dia tivesse rendimento típico, daria X". Sem dados no mês inteiro
+ * (`ativos === 0`) → 0.
+ */
+function estimativaCalculada(
+  g: GeracaoRow,
+  selectedDays: Set<number>,
+): number {
   const total = totalKwh(g.dias);
   const ativos = diasComDado(g.dias);
   if (ativos === 0) return 0;
-  return (total / ativos) * diasNoMes(g.ano, g.mes);
+  const avgDaily = total / ativos;
+  const count =
+    selectedDays.size === 0 ? diasNoMes(g.ano, g.mes) : selectedDays.size;
+  return avgDaily * count;
 }
 
 function usinaLabel(g: GeracaoRow) {
@@ -195,6 +249,63 @@ function GeracaoAnalytics({
     uf: (row) => row.usina?.uf?.trim() || null,
   });
 
+  // Seleção de dias — filtro global aplicado em todas as métricas:
+  // realizado, estimado, meta, receita evitada, ranking, atenção, comparativo.
+  // Empty set = sem filtro (comportamento como antes).
+  const [selectedDays, setSelectedDays] = useState<Set<number>>(new Set());
+
+  // Período "referência" pro calendário visual: mais recente entre os
+  // selectedRows. A SELEÇÃO de dias (números 1..31) é aplicada em TODOS
+  // os períodos — o calendário só ajuda a saber qual número cai em qual
+  // dia da semana.
+  const referencePeriod = useMemo<ReferencePeriod | null>(() => {
+    if (selectedRows.length === 0) return null;
+    let bestAno = -1;
+    let bestMesIdx = -1;
+    for (const row of selectedRows) {
+      const ano = row.ano ?? 0;
+      const mIdx = mesIndex(row.mes);
+      if (ano <= 0 || mIdx < 0) continue;
+      if (
+        ano > bestAno ||
+        (ano === bestAno && mIdx > bestMesIdx)
+      ) {
+        bestAno = ano;
+        bestMesIdx = mIdx;
+      }
+    }
+    if (bestAno < 0 || bestMesIdx < 0) return null;
+    return { ano: bestAno, mesIdx: bestMesIdx };
+  }, [selectedRows]);
+
+  // Dias com kWh > 0 no período de referência — usado pra destacar e pro
+  // atalho "Dias com dados".
+  const daysWithData = useMemo<Set<number>>(() => {
+    if (!referencePeriod) return new Set();
+    const out = new Set<number>();
+    for (const row of selectedRows) {
+      if ((row.ano ?? 0) !== referencePeriod.ano) continue;
+      if (mesIndex(row.mes) !== referencePeriod.mesIdx) continue;
+      for (const d of row.dias) {
+        if (d.kwh != null && d.kwh > 0) out.add(d.dia);
+      }
+    }
+    return out;
+  }, [selectedRows, referencePeriod]);
+
+  // Quantos períodos distintos estão no escopo — pra avisar no calendário
+  // que a seleção aplica em todos.
+  const distinctPeriodCount = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of selectedRows) {
+      const ano = row.ano ?? 0;
+      const mIdx = mesIndex(row.mes);
+      if (ano <= 0 || mIdx < 0) continue;
+      keys.add(`${ano}-${mIdx}`);
+    }
+    return keys.size;
+  }, [selectedRows]);
+
   const tarifas = useMemo<TarifaSnapshot[]>(
     () =>
       tarifasDistribuidoras.map((t) => ({
@@ -210,7 +321,7 @@ function GeracaoAnalytics({
 
   const data = useMemo(() => {
     const totalRealizado = selectedRows.reduce(
-      (acc, row) => acc + totalKwh(row.dias),
+      (acc, row) => acc + kwhFiltered(row.dias, selectedDays),
       0,
     );
 
@@ -287,7 +398,7 @@ function GeracaoAnalytics({
         });
         continue;
       }
-      const kwhGerado = totalKwh(row.dias);
+      const kwhGerado = kwhFiltered(row.dias, selectedDays);
       if (kwhGerado <= 0) {
         skipped.push({
           rowId: row.id,
@@ -316,11 +427,11 @@ function GeracaoAnalytics({
     }
     const rowsComTarifa = selectedRows.length - skipped.length;
     const totalEstimado = selectedRows.reduce(
-      (acc, row) => acc + estimativaMensal(row),
+      (acc, row) => acc + estimativaCalculada(row, selectedDays),
       0,
     );
     const totalMeta = selectedRows.reduce(
-      (acc, row) => acc + (metaMensalCalculada(row) ?? 0),
+      (acc, row) => acc + (metaCalculada(row, selectedDays) ?? 0),
       0,
     );
     const usinas = new Set(selectedRows.map((row) => usinaLabel(row)));
@@ -339,23 +450,11 @@ function GeracaoAnalytics({
         meta: number;
       }
     >();
-    const periodos = new Map<
-      string,
-      {
-        label: string;
-        ano: number;
-        mesIdx: number;
-        realizado: number;
-        estimado: number;
-        meta: number;
-      }
-    >();
-
     for (const row of selectedRows) {
       const label = usinaLabel(row);
-      const realizado = totalKwh(row.dias);
-      const estimado = estimativaMensal(row);
-      const meta = metaMensalCalculada(row) ?? 0;
+      const realizado = kwhFiltered(row.dias, selectedDays);
+      const estimado = estimativaCalculada(row, selectedDays);
+      const meta = metaCalculada(row, selectedDays) ?? 0;
 
       const currentUsina = usinasRank.get(label) ?? {
         label,
@@ -369,45 +468,80 @@ function GeracaoAnalytics({
       currentUsina.estimado += estimado;
       currentUsina.meta += meta;
       usinasRank.set(label, currentUsina);
-
-      const mesIdx = mesIndex(row.mes);
-      const ano = row.ano ?? 0;
-      const key = periodKey(row);
-      const currentPeriod = periodos.get(key) ?? {
-        label: periodoLabel(row),
-        ano,
-        mesIdx,
-        realizado: 0,
-        estimado: 0,
-        meta: 0,
-      };
-      currentPeriod.realizado += realizado;
-      currentPeriod.estimado += estimado;
-      currentPeriod.meta += meta;
-      periodos.set(key, currentPeriod);
     }
 
+    // Base da comparação com a meta:
+    //  - Sem filtro de dias: usa `estimado` (projeção pro mês inteiro vs meta
+    //    mensal) — responde "estamos no caminho de bater a meta?".
+    //  - Com filtro de dias: usa `realizado` (kWh real na janela vs meta
+    //    proporcional) — responde "nessa janela, batemos a meta?". Não faz
+    //    sentido projetar quando o usuário escolheu uma janela específica.
+    const usaProjecao = selectedDays.size === 0;
     const usinasOrdenadas = [...usinasRank.values()]
-      .map((item) => ({
-        ...item,
-        diferenca: item.estimado - item.meta,
-        pctMeta: item.meta > 0 ? (item.realizado / item.meta) * 100 : null,
-        receitaEvitada: receitaPorUsina.get(item.label) ?? null,
-      }))
+      .map((item) => {
+        const base = usaProjecao ? item.estimado : item.realizado;
+        return {
+          ...item,
+          diferenca: base - item.meta,
+          pctMeta: item.meta > 0 ? (base / item.meta) * 100 : null,
+          receitaEvitada: receitaPorUsina.get(item.label) ?? null,
+        };
+      })
       .sort((a, b) => b.realizado - a.realizado);
 
     const abaixoMeta = [...usinasOrdenadas]
-      .filter((item) => item.meta > 0 && item.estimado < item.meta)
+      .filter((item) => item.meta > 0 && item.diferenca < 0)
       .sort((a, b) => a.diferenca - b.diferenca);
 
-    const periodosRank = [...periodos.values()].sort(periodSort);
+    // Séries diárias por período selecionado — eixo Y = soma de kWh do dia D
+    // em todas as usinas selecionadas (UF) daquele período. Cap implícito de
+    // 31 posições. Dia sem nenhum registro fica `null` (gráfico não conecta).
+    // Construção em 2 passos pra ficar O(n) — primeiro acumula em maps, depois
+    // converte cada slot pra number|null (null se ninguém escreveu).
+    const seriesAcc = new Map<
+      string,
+      {
+        label: string;
+        ano: number;
+        mesIdx: number;
+        slots: Array<number | null>;
+      }
+    >();
+    for (const row of selectedRows) {
+      const key = periodKey(row);
+      let entry = seriesAcc.get(key);
+      if (!entry) {
+        entry = {
+          label: periodoLabel(row),
+          ano: row.ano ?? 0,
+          mesIdx: mesIndex(row.mes),
+          slots: new Array<number | null>(31).fill(null),
+        };
+        seriesAcc.set(key, entry);
+      }
+      for (const d of row.dias) {
+        if (d.kwh == null) continue;
+        const idx = d.dia - 1;
+        if (idx < 0 || idx > 30) continue;
+        entry.slots[idx] = (entry.slots[idx] ?? 0) + d.kwh;
+      }
+    }
+    // Ordena cronologicamente — recente primeiro pra casar com a sorting do
+    // filtro de períodos (mantém legenda alinhada com a ordem mostrada lá).
+    const dailySeries: DailySeries[] = [...seriesAcc.entries()]
+      .map(([key, v]) => ({ key, label: v.label, ano: v.ano, mesIdx: v.mesIdx, dias: v.slots }))
+      .sort((a, b) => b.ano - a.ano || b.mesIdx - a.mesIdx)
+      .map(({ key, label, dias }) => ({ key, label, dias }));
+
+    // Diferença/pct globais seguem a mesma regra das usinas (ver acima).
+    const baseGlobal = usaProjecao ? totalEstimado : totalRealizado;
 
     return {
       totalRealizado,
       totalEstimado,
       totalMeta,
-      diferenca: totalEstimado - totalMeta,
-      pctMeta: totalMeta > 0 ? (totalEstimado / totalMeta) * 100 : null,
+      diferenca: baseGlobal - totalMeta,
+      pctMeta: totalMeta > 0 ? (baseGlobal / totalMeta) * 100 : null,
       usinasCount: usinas.size,
       diasInformados,
       receitaEvitadaTotal,
@@ -415,18 +549,17 @@ function GeracaoAnalytics({
       skipped,
       usinasOrdenadas,
       abaixoMeta,
-      periodosRank,
+      dailySeries,
     };
-  }, [selectedRows, tarifas]);
+  }, [selectedRows, tarifas, selectedDays]);
 
   if (rows.length === 0)
     return <EmptyAnalytics message="Sem dados de geração para analisar." />;
 
-  const maxPeriodo = Math.max(
-    ...data.periodosRank.map((item) => item.realizado),
-    0,
-  );
   const diffIsPositive = data.diferenca >= 0;
+
+  const diasSummary =
+    selectedDays.size > 0 ? formatSelectedDays(selectedDays) : null;
 
   return (
     <section className="flex flex-col gap-4">
@@ -435,6 +568,11 @@ function GeracaoAnalytics({
           <div className="text-sm font-medium">Indicadores de geração</div>
           <div className="text-xs text-muted-foreground">
             Filtros: {filterSummary}
+            {diasSummary && (
+              <>
+                <span className="mx-1">·</span>Dias: {diasSummary}
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -460,6 +598,14 @@ function GeracaoAnalytics({
         </div>
       </div>
 
+      <MonthCalendarSelector
+        reference={referencePeriod}
+        isMultiPeriod={distinctPeriodCount > 1}
+        selectedDays={selectedDays}
+        onChange={setSelectedDays}
+        daysWithData={daysWithData}
+      />
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           title="Geração realizada"
@@ -470,13 +616,21 @@ function GeracaoAnalytics({
         <MetricCard
           title="Geração estimada"
           value={`${fmtCompact(data.totalEstimado)} kWh`}
-          description="média dos dias informados x dias do mês"
+          description={
+            selectedDays.size > 0
+              ? "média diária do mês × dias selecionados"
+              : "média dos dias informados x dias do mês"
+          }
           icon={<TrendingUp className="h-4 w-4" />}
         />
         <MetricCard
           title="Diferença vs meta"
           value={`${diffIsPositive ? "+" : ""}${fmtCompact(data.diferenca)} kWh`}
-          description={`${fmtPct(data.pctMeta)} da meta com fator climático`}
+          description={
+            selectedDays.size > 0
+              ? `${fmtPct(data.pctMeta)} da meta · base: realizado`
+              : `${fmtPct(data.pctMeta)} da meta · base: estimado mensal`
+          }
           icon={<Target className="h-4 w-4" />}
         />
         <MetricCard
@@ -581,26 +735,21 @@ function GeracaoAnalytics({
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>Evolução por período</CardTitle>
-            <Gauge className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <CardTitle>Comparativo diário por período</CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cada linha = soma de kWh por dia das usinas filtradas no
+                período. Selecione 2+ períodos pra sobrepor.
+              </p>
+            </div>
+            <Gauge className="h-4 w-4 shrink-0 text-muted-foreground" />
           </div>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {data.periodosRank.map((item) => (
-            <div key={`${item.ano}-${item.mesIdx}`} className="space-y-1.5">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium">{item.label}</span>
-                <span className="text-muted-foreground">
-                  {fmtCompact(item.realizado)} kWh
-                </span>
-              </div>
-              <Bar
-                value={item.realizado}
-                max={maxPeriodo}
-                className="bg-emerald-500"
-              />
-            </div>
-          ))}
+        <CardContent>
+          <GeracaoDiariaChart
+            series={data.dailySeries}
+            selectedDays={selectedDays}
+          />
         </CardContent>
       </Card>
 
