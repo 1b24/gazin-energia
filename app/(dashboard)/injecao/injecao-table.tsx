@@ -8,11 +8,17 @@ import {
   BarChart3,
   Building2,
   DatabaseZap,
+  FileSpreadsheet,
   Paperclip,
   PiggyBank,
   PlugZap,
+  Upload,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState, useTransition } from "react";
+
+import { Button } from "@/components/ui/button";
+
+import { InjecaoImportDialog } from "./import-dialog";
 
 import { Bar } from "@/components/analytics/bar";
 import { EmptyAnalytics } from "@/components/analytics/empty-state";
@@ -854,6 +860,24 @@ export function InjecaoTable({
 }: Props) {
   const fields = buildInjecaoFormFields(filialOptions, fornecedorOptions);
   const activeRows = useMemo(() => rows.filter((row) => !row.deletedAt), [rows]);
+  const [importOpen, setImportOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  // Download do modelo oficial (XLSX em PT-BR com colunas técnicas ocultas).
+  function handleDownloadModel() {
+    startTransition(async () => {
+      const payload = await actions.exportInjecaoModel();
+      const blob = new Blob([payload.buffer], { type: payload.mimetype });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = payload.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -872,7 +896,31 @@ export function InjecaoTable({
         initialColumnVisibility={HIDDEN_BY_DEFAULT}
         actions={actions}
         details={renderDetails}
+        toolbarExtras={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadModel}
+              disabled={pending}
+              title="Baixa um Excel preenchido com as injeções atuais — use como modelo pra editar e reimportar."
+            >
+              <FileSpreadsheet className="mr-1 h-4 w-4" />
+              Baixar modelo
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setImportOpen(true)}
+              disabled={pending}
+            >
+              <Upload className="mr-1 h-4 w-4" />
+              Importar Excel
+            </Button>
+          </>
+        }
       />
+      <InjecaoImportDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }
