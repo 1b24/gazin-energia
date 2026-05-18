@@ -567,7 +567,7 @@ async function importFornecedores(prisma: PrismaClient) {
   }
 }
 
-async function importGeracao(prisma: PrismaClient) {
+export async function importGeracao(prisma: PrismaClient) {
   const rows = await loadJson("geracao.json");
   const usinaMap = await buildUsinaNameMap(prisma);
   const manualChanges = await buildModelManualChangeMap(prisma, "Geracao");
