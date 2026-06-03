@@ -202,6 +202,91 @@ confirmação.
 - Firewall: regras com `-Profile Domain,Private -RemoteAddress 172.17.10.0/24`.
 - `allowedDevOrigins` em `next.config.ts` precisa do IP da LAN pro HMR.
 
+## 14. Contrato de atendimento — workflow e formato de resposta
+
+Instrução padrão de como o agente deve servir e responder às solicitações do
+usuário. Complementa as seções 1–13 (que continuam sendo a fonte da verdade dos
+invariantes); aqui o foco é **workflow** e **formato da resposta final**.
+
+### Contexto do projeto
+
+- Caminho local: `C:\Users\heitor.correa\Gestaoenergetica\gazin-energia`
+- Stack principal: Next.js 16 (App Router) — _ver aviso no topo deste arquivo:
+  vale a versão instalada, não a do treino_ —, TypeScript strict, Prisma +
+  PostgreSQL, NextAuth v5, shadcn/ui, TanStack Table, React Hook Form, Zod,
+  nuqs, Recharts, decimal.js, date-fns (ptBR), lucide-react.
+- Objetivo geral: manter e evoluir o sistema interno de gestão energética da
+  Gazin (usinas, fornecedores, consumo, faturas, dashboards, filtros, tabelas,
+  permissões, auditoria, relatórios), organizando fluxos que antes ficavam
+  espalhados em Zoho, planilhas, PDFs e arquivos.
+
+### Antes de alterar qualquer coisa
+
+1. Use o Graphify como mapa estrutural do projeto.
+2. Localize rotas, componentes, actions, schemas, services, hooks, entidades e
+   relações relevantes.
+3. Não abra arquivos desnecessários nem leia o projeto inteiro — só o que a
+   tarefa exige.
+
+### Uso do Graphify
+
+- Use `graphify-out/GRAPH_REPORT.md`, `graphify-out/graph.json` ou o skill do
+  Graphify para entender a estrutura antes de editar (ver também seção 6).
+- Rode `graphify update .` **somente** quando houver mudança estrutural:
+  criação/remoção/renomeação/movimentação de arquivos; alteração de
+  imports/exports importantes; alteração de rotas; providers/contextos;
+  services/APIs; models/schemas/entidades centrais; novos módulos ou mudança
+  de pastas.
+- Não reindexe para edições internas simples que não mudam relações.
+
+### Regras de implementação
+
+- Mudanças mínimas, seguras e rastreáveis; preserve arquitetura e padrões.
+- Preserve RBAC, permissões, audit log, uploads, soft delete, registry e
+  migrations (reforça seções 1 e 12).
+- Não troque bibliotecas sem necessidade real; não refatore arquitetura inteira
+  sem pedir; não altere regra de negócio sem justificar.
+- Sem `any`, `as any`, `@ts-ignore` ou gambiarras — tipagem forte, Zod quando
+  aplicável.
+- Respeite a separação Server/Client Components, server actions, cache e
+  revalidate existentes. Mantenha responsividade, acessibilidade e consistência
+  visual shadcn/ui.
+
+### Workflow esperado
+
+1. Entenda a tarefa. 2. Consulte o Graphify para localizar os arquivos.
+3. Liste brevemente os arquivos relevantes antes de editar. 4. Faça a menor
+alteração possível. 5. Valide tipos/lint/regras quando fizer sentido.
+6. Explique o que mudou. 7. Não esconda erro de validação.
+
+### Comandos de validação
+
+`npx tsc --noEmit` · `npx eslint .` · `npm run check` · `npm run check:rbac` ·
+`npm run build`. Use só os que fizerem sentido. Se algum falhar: mostre o erro,
+diga se foi causado pela alteração ou se já existia, corrija se estiver no
+escopo, não finja que passou.
+
+### Formato da resposta final
+
+Responda sempre com:
+
+1. **Resumo** — em poucas linhas, o que foi feito.
+2. **Arquivos alterados** — cada arquivo e o motivo.
+3. **Validação** — comandos executados, se passaram ou falharam (e por quê).
+4. **Graphify** — se consultou; se rodou `graphify update .` ou não (e por quê).
+5. **Riscos/observações** — riscos reais, limitações, pontos p/ revisão humana.
+6. **Commit sugerido** — curto e semântico (`feat:`, `fix:`, `refactor:`,
+   `chore:`).
+
+### Postura
+
+Aja como revisor técnico rigoroso. Prefira solução pequena e correta a grande e
+arriscada. Não invente arquivos, funções ou regras. Se precisar inferir algo,
+diga claramente.
+
+> Nota de precedência: este formato de 6 seções é a estrutura da **resposta
+> final**; a concisão pedida na seção 8 aplica-se ao conteúdo de cada seção.
+
 ---
 
-_Última atualização: 2026-05-14._
+_Última atualização: 2026-06-03._
