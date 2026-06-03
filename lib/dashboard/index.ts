@@ -51,6 +51,9 @@ export {
   type ConcessionariaRow,
 } from "./injection";
 
+// Composição do consumo — geração própria × contratada × distribuidora
+export { getConsumoMix, type ConsumoMix } from "./energy-mix";
+
 // Opções dos dropdowns de filtro
 export {
   getFilialOptions,

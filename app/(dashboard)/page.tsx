@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 
 import { ConcessionariaFilter } from "@/components/dashboard/concessionaria-filter";
+import { ConsumoMixGauge } from "@/components/dashboard/consumo-mix-gauge";
 import { FilialFilter } from "@/components/dashboard/filial-filter";
 import { GeracaoChart } from "@/components/dashboard/geracao-chart";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -31,6 +32,7 @@ import {
   getAlerts,
   getAtencao,
   getConcessionariaOptions,
+  getConsumoMix,
   getFilialOptions,
   getGeracaoSerie,
   getInjecaoPorConcessionaria,
@@ -75,6 +77,7 @@ export default async function DashboardHomePage({
   const period = periodFromQuery({ ano: sp.ano, mes: sp.mes });
 
   const kpis = await getKpis(filialFilter, period, ufFilter);
+  const consumoMix = await getConsumoMix(filialFilter, period, ufFilter);
   const alerts = await getAlerts(filialFilter, ufFilter);
   const serieRaw = await getGeracaoSerie(filialFilter, period, ufFilter);
   const atencaoRaw = await getAtencao(
@@ -175,6 +178,30 @@ export default async function DashboardHomePage({
           icon={<Gauge className="h-4 w-4" />}
         />
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Gauge className="h-4 w-4" /> Consumo por fonte de geração
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Mês de {period.mesPt}/{period.ano} — % do consumo total atendido por
+            geração própria (usinas) e contratada (injeção de terceiros). O
+            restante vem da distribuidora (cativo).
+          </p>
+        </CardHeader>
+        <CardContent>
+          <ConsumoMixGauge
+            consumoTotalKwh={consumoMix.consumoTotalKwh}
+            geracaoPropriaKwh={consumoMix.geracaoPropriaKwh}
+            geracaoContratadaKwh={consumoMix.geracaoContratadaKwh}
+            distribuidoraKwh={consumoMix.distribuidoraKwh}
+            pctPropria={consumoMix.pctPropria}
+            pctContratada={consumoMix.pctContratada}
+            pctDistribuidora={consumoMix.pctDistribuidora}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">
