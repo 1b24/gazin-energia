@@ -76,28 +76,40 @@ export default async function DashboardHomePage({
 
   const period = periodFromQuery({ ano: sp.ano, mes: sp.mes });
 
-  const kpis = await getKpis(filialFilter, period, ufFilter);
-  const consumoMix = await getConsumoMix(filialFilter, period, ufFilter);
-  const alerts = await getAlerts(filialFilter, ufFilter);
-  const serieRaw = await getGeracaoSerie(filialFilter, period, ufFilter);
-  const atencaoRaw = await getAtencao(
-    filialFilter,
-    period,
-    ufFilter,
-    concessionariaFilter,
-  );
-  const orcadoRealizadoRaw = await getOrcadoVsRealizado(filialFilter, ufFilter);
-  const ufsRaw = await getUsinasPorUF(filialFilter, ufFilter);
-  const concessionariasRaw = await getInjecaoPorConcessionaria(
-    filialFilter,
-    period,
-    ufFilter,
-    concessionariaFilter,
-  );
-  const filialOptions = await getFilialOptions();
-  const yearOptions = await getYearOptions(filialFilter);
-  const ufOptions = await getUfOptions(filialFilter);
-  const concessionariaOptions = await getConcessionariaOptions(filialFilter);
+  // Agregações independentes entre si — paralelizar corta o tempo da página
+  // para o da query mais lenta (antes: ~12 awaits sequenciais, 2-4s).
+  const [
+    kpis,
+    consumoMix,
+    alerts,
+    serieRaw,
+    atencaoRaw,
+    orcadoRealizadoRaw,
+    ufsRaw,
+    concessionariasRaw,
+    filialOptions,
+    yearOptions,
+    ufOptions,
+    concessionariaOptions,
+  ] = await Promise.all([
+    getKpis(filialFilter, period, ufFilter),
+    getConsumoMix(filialFilter, period, ufFilter),
+    getAlerts(filialFilter, ufFilter),
+    getGeracaoSerie(filialFilter, period, ufFilter),
+    getAtencao(filialFilter, period, ufFilter, concessionariaFilter),
+    getOrcadoVsRealizado(filialFilter, ufFilter),
+    getUsinasPorUF(filialFilter, ufFilter),
+    getInjecaoPorConcessionaria(
+      filialFilter,
+      period,
+      ufFilter,
+      concessionariaFilter,
+    ),
+    getFilialOptions(),
+    getYearOptions(filialFilter),
+    getUfOptions(filialFilter),
+    getConcessionariaOptions(filialFilter),
+  ]);
 
   const serie = serializePrisma(serieRaw) as typeof serieRaw;
   const orcadoRealizado = serializePrisma(
