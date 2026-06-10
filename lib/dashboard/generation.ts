@@ -106,19 +106,21 @@ export async function getAtencao(
   // injeção dessa concessionária no período.
   let concessionariaFilialIds: string[] | undefined;
   if (concessionariaFilter) {
-    const injecoes = await db.injecao.findMany({
-      where: {
-        ano: p.ano,
-        mes: p.mesPt,
-        deletedAt: null,
-        ...scopeWhere("filial", filialFilter, ufFilter),
-      },
-      select: {
-        filialId: true,
-        fornecedor: { select: { nome: true } },
-        fornecedorRaw: true,
-      },
-    });
+    const injecoes = await retryClosedConnection(() =>
+      db.injecao.findMany({
+        where: {
+          ano: p.ano,
+          mes: p.mesPt,
+          deletedAt: null,
+          ...scopeWhere("filial", filialFilter, ufFilter),
+        },
+        select: {
+          filialId: true,
+          fornecedor: { select: { nome: true } },
+          fornecedorRaw: true,
+        },
+      }),
+    );
 
     concessionariaFilialIds = Array.from(
       new Set(

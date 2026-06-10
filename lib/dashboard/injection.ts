@@ -3,6 +3,7 @@
  * cruzando com Consumo da mesma filial/período para mostrar share da
  * concessionária no consumo do cliente.
  */
+import { retryClosedConnection } from "@/lib/db";
 import { getCurrentPeriod, type CurrentPeriod } from "@/lib/period";
 
 import { decimalToNumber, getDb, scopeWhere } from "./scope";
@@ -31,22 +32,24 @@ export async function getInjecaoPorConcessionaria(
   const { db } = await getDb(filialFilter);
   const p = period ?? getCurrentPeriod();
 
-  const injecoes = await db.injecao.findMany({
-    where: {
-      ano: p.ano,
-      mes: p.mesPt,
-      deletedAt: null,
-      ...scopeWhere("filial", filialFilter, ufFilter),
-    },
-    select: {
-      uc: true,
-      consumoTotalKwh: true,
-      valor: true,
-      filialId: true,
-      fornecedor: { select: { nome: true } },
-      fornecedorRaw: true,
-    },
-  });
+  const injecoes = await retryClosedConnection(() =>
+    db.injecao.findMany({
+      where: {
+        ano: p.ano,
+        mes: p.mesPt,
+        deletedAt: null,
+        ...scopeWhere("filial", filialFilter, ufFilter),
+      },
+      select: {
+        uc: true,
+        consumoTotalKwh: true,
+        valor: true,
+        filialId: true,
+        fornecedor: { select: { nome: true } },
+        fornecedorRaw: true,
+      },
+    }),
+  );
 
   const filialIds = Array.from(
     new Set(injecoes.map((i) => i.filialId).filter((v): v is string => !!v)),
@@ -54,16 +57,18 @@ export async function getInjecaoPorConcessionaria(
 
   const consumos =
     filialIds.length > 0
-      ? await db.consumo.findMany({
-          where: {
-            ano: p.ano,
-            mes: p.mesPt,
-            deletedAt: null,
-            filialId: { in: filialIds },
-            ...scopeWhere("filial", filialFilter, ufFilter),
-          },
-          select: { uc: true, filialId: true, consumoTotal: true },
-        })
+      ? await retryClosedConnection(() =>
+          db.consumo.findMany({
+            where: {
+              ano: p.ano,
+              mes: p.mesPt,
+              deletedAt: null,
+              filialId: { in: filialIds },
+              ...scopeWhere("filial", filialFilter, ufFilter),
+            },
+            select: { uc: true, filialId: true, consumoTotal: true },
+          }),
+        )
       : [];
 
   // Chave composta `uc|filialId` — UC sozinha pode repetir entre filiais e o
@@ -116,16 +121,18 @@ export async function getConcessionariaOptions(
   filialFilter?: string,
 ): Promise<string[]> {
   const { db } = await getDb(filialFilter);
-  const rows = await db.injecao.findMany({
-    where: {
-      deletedAt: null,
-      ...(filialFilter ? { filialId: filialFilter } : {}),
-    },
-    select: {
-      fornecedor: { select: { nome: true } },
-      fornecedorRaw: true,
-    },
-  });
+  const rows = await retryClosedConnection(() =>
+    db.injecao.findMany({
+      where: {
+        deletedAt: null,
+        ...(filialFilter ? { filialId: filialFilter } : {}),
+      },
+      select: {
+        fornecedor: { select: { nome: true } },
+        fornecedorRaw: true,
+      },
+    }),
+  );
   const set = new Set<string>();
   for (const r of rows) {
     const nome = r.fornecedor?.nome?.trim() || r.fornecedorRaw?.trim() || "";

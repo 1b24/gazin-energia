@@ -2,6 +2,8 @@
  * Alertas operacionais para o dashboard — licenças (stub), manutenções e
  * processos jurídicos com atenção.
  */
+import { retryClosedConnection } from "@/lib/db";
+
 import { getDb, scopeWhere } from "./scope";
 
 export interface DashboardAlerts {
@@ -26,26 +28,32 @@ export async function getAlerts(
   const { db } = await getDb(filialFilter);
 
   // Licenças (stub) — count atual será 0 até JSON chegar.
-  const licencasVencendo = await db.licenca.count({
-    where: {
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-  });
+  const licencasVencendo = await retryClosedConnection(() =>
+    db.licenca.count({
+      where: {
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+    }),
+  );
 
-  const corretivas = await db.manutencaoCorretiva.count({
-    where: {
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-  });
-  const preventivasAbertas = await db.manutencaoPreventiva.count({
-    where: {
-      status: { in: ["pendente", "em_andamento"] },
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-  });
+  const corretivas = await retryClosedConnection(() =>
+    db.manutencaoCorretiva.count({
+      where: {
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+    }),
+  );
+  const preventivasAbertas = await retryClosedConnection(() =>
+    db.manutencaoPreventiva.count({
+      where: {
+        status: { in: ["pendente", "em_andamento"] },
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+    }),
+  );
   const manutencoesAbertas = corretivas + preventivasAbertas;
 
   // Processos: ProcessoJuridico não tem FK de filial nem UF — só agrega
@@ -54,9 +62,11 @@ export async function getAlerts(
   const processosAtencao =
     filialFilter || ufFilter
       ? 0
-      : await db.processoJuridico.count({
-          where: { tipo: "judicial", deletedAt: null },
-        });
+      : await retryClosedConnection(() =>
+          db.processoJuridico.count({
+            where: { tipo: "judicial", deletedAt: null },
+          }),
+        );
 
   return { licencasVencendo, manutencoesAbertas, processosAtencao };
 }

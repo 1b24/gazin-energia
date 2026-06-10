@@ -2,6 +2,8 @@
  * Distribuição de usinas por UF — substituto do mapa do Brasil no dashboard,
  * agrupando por estado e status operacional.
  */
+import { retryClosedConnection } from "@/lib/db";
+
 import { getDb } from "./scope";
 
 export interface UfBucket {
@@ -18,14 +20,16 @@ export async function getUsinasPorUF(
   ufFilter?: string,
 ): Promise<UfBucket[]> {
   const { db } = await getDb(filialFilter);
-  const usinas = await db.usina.findMany({
-    where: {
-      deletedAt: null,
-      uf: ufFilter ? (ufFilter as never) : { not: null },
-      ...(filialFilter ? { filialId: filialFilter } : {}),
-    },
-    select: { uf: true, status: true },
-  });
+  const usinas = await retryClosedConnection(() =>
+    db.usina.findMany({
+      where: {
+        deletedAt: null,
+        uf: ufFilter ? (ufFilter as never) : { not: null },
+        ...(filialFilter ? { filialId: filialFilter } : {}),
+      },
+      select: { uf: true, status: true },
+    }),
+  );
 
   const buckets = new Map<string, UfBucket>();
   for (const u of usinas) {

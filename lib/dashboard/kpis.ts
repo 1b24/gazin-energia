@@ -61,30 +61,34 @@ export async function getKpis(
     geracaoMetaKwh > 0 ? (geracaoRealizadaKwh / geracaoMetaKwh) * 100 : null;
 
   // Faturamento de venda — VendaKwh usa "01".."12".
-  const vendas = await db.vendaKwh.findMany({
-    where: {
-      ano: p.ano,
-      mes: p.mesNum,
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-    select: { valorReais: true },
-  });
+  const vendas = await retryClosedConnection(() =>
+    db.vendaKwh.findMany({
+      where: {
+        ano: p.ano,
+        mes: p.mesNum,
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+      select: { valorReais: true },
+    }),
+  );
   const faturamentoVendaReais = vendas.reduce(
     (acc, v) => acc + decimalToNumber(v.valorReais),
     0,
   );
 
   // Consumo total do mês.
-  const consumos = await db.consumo.findMany({
-    where: {
-      ano: p.ano,
-      mes: p.mesPt,
-      deletedAt: null,
-      ...scopeWhere("filial", filialFilter, ufFilter),
-    },
-    select: { consumoTotal: true, consumoKwhP: true, consumoKwhFp: true },
-  });
+  const consumos = await retryClosedConnection(() =>
+    db.consumo.findMany({
+      where: {
+        ano: p.ano,
+        mes: p.mesPt,
+        deletedAt: null,
+        ...scopeWhere("filial", filialFilter, ufFilter),
+      },
+      select: { consumoTotal: true, consumoKwhP: true, consumoKwhFp: true },
+    }),
+  );
   const consumoTotalKwh = consumos.reduce(
     (acc, c) => acc + decimalToNumber(c.consumoTotal),
     0,
@@ -99,13 +103,15 @@ export async function getKpis(
   );
 
   // Usinas operacionais — não-deletadas, status = "operacional".
-  const usinasOperacionais = await db.usina.count({
-    where: {
-      status: "operacional",
-      deletedAt: null,
-      ...scopeWhere("self", filialFilter, ufFilter),
-    },
-  });
+  const usinasOperacionais = await retryClosedConnection(() =>
+    db.usina.count({
+      where: {
+        status: "operacional",
+        deletedAt: null,
+        ...scopeWhere("self", filialFilter, ufFilter),
+      },
+    }),
+  );
 
   return {
     geracaoRealizadaKwh,

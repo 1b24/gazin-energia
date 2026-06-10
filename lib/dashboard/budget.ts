@@ -2,6 +2,7 @@
  * Orçado vs Realizado por mês — agrega `Orcamento.usoConsumo` (orçado) contra
  * a soma de `realUsoConsumo + realEquipamentos + realViagensEstadias`.
  */
+import { retryClosedConnection } from "@/lib/db";
 import { MESES_PT } from "@/lib/period";
 
 import { decimalToNumber, getDb, scopeWhere } from "./scope";
@@ -17,19 +18,21 @@ export async function getOrcadoVsRealizado(
   ufFilter?: string,
 ): Promise<OrcadoRealizadoPoint[]> {
   const { db } = await getDb(filialFilter);
-  const orcamentos = await db.orcamento.findMany({
-    where: {
-      deletedAt: null,
-      ...scopeWhere("usina", filialFilter, ufFilter),
-    },
-    select: {
-      mes: true,
-      usoConsumo: true,
-      realUsoConsumo: true,
-      realEquipamentos: true,
-      realViagensEstadias: true,
-    },
-  });
+  const orcamentos = await retryClosedConnection(() =>
+    db.orcamento.findMany({
+      where: {
+        deletedAt: null,
+        ...scopeWhere("usina", filialFilter, ufFilter),
+      },
+      select: {
+        mes: true,
+        usoConsumo: true,
+        realUsoConsumo: true,
+        realEquipamentos: true,
+        realViagensEstadias: true,
+      },
+    }),
+  );
 
   const map = new Map<string, { orc: number; real: number }>();
   for (const o of orcamentos) {
