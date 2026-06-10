@@ -15,7 +15,10 @@ import {
   useWatch,
   type Control,
   type DefaultValues,
+  type FieldValues,
   type Resolver,
+  type UseFormRegister,
+  type UseFormSetValue,
 } from "react-hook-form";
 import type { z } from "zod";
 
@@ -273,7 +276,14 @@ export function EntityForm<S extends z.ZodObject>({
                 {f.emptyMessage}
               </div>
             ) : (
-              renderField(f, register, control, setValue)
+              renderField(
+                f,
+                // Cast de borda: o RHF é tipado com `FormValues = z.infer<S>`
+                // (genérico deferido); renderField usa o supertipo FieldValues.
+                register as unknown as UseFormRegister<FieldValues>,
+                control as unknown as Control<FieldValues>,
+                setValue as unknown as UseFormSetValue<FieldValues>,
+              )
             )}
 
             {f.helpText && !errMsg && !isEmptySelect && (
@@ -304,14 +314,14 @@ export function EntityForm<S extends z.ZodObject>({
 // Field renderer — extraído pra simplificar a leitura do form principal.
 // ----------------------------------------------------------------------------
 
+// Não-genérico (vive fora do componente, não enxerga `S`) — degrada pra
+// `FieldValues` na borda: `Path<FieldValues>` resolve pra `string`, então
+// `f.name` flui sem cast e o corpo inteiro fica type-checked.
 function renderField(
   f: FormFieldConfig,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  register: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  control: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setValue: any,
+  register: UseFormRegister<FieldValues>,
+  control: Control<FieldValues>,
+  setValue: UseFormSetValue<FieldValues>,
 ) {
   switch (f.type) {
     case "text":
