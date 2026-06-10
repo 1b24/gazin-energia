@@ -8,6 +8,7 @@ import { Paperclip } from "lucide-react";
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
+import { fmtBRL, fmtKwh } from "@/lib/format";
 import type { UsinaOption } from "@/lib/schemas/geracao";
 import {
   MES_OPTIONS,
@@ -25,22 +26,6 @@ export type VendaKwhRow = Serialized<VendaKwh> & {
 const MES_LABEL: Record<string, string> = Object.fromEntries(
   MES_OPTIONS.map((o) => [o.value, o.label]),
 );
-
-const fmtKwh = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-
-const fmtBRL = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      });
 
 function FileLink({ url }: { url: string | null | undefined }) {
   if (!url) return <span className="text-muted-foreground">—</span>;

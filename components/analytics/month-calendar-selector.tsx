@@ -16,6 +16,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
+import { formatRuns } from "@/lib/runs";
 import { cn } from "@/lib/utils";
 
 /** Brasil: semana começa segunda. */
@@ -208,26 +209,10 @@ export function MonthCalendarSelector({
 
 /**
  * Formata um Set de dias em string compacta com runs contíguos.
- *   {1,2,3,8,9}    -> "1–3, 8–9"
- *   {5,7,9}        -> "5, 7, 9"
- *   {8,9,10,11}    -> "8–11"
- *   {}             -> ""
+ *   {1,2,3,8,9} -> "1–3, 8–9" · {5,7,9} -> "5, 7, 9" · {} -> ""
+ * Delega pra `lib/runs.ts` (compartilhado com o gráfico de geração diária);
+ * mantido como export pra preservar os imports existentes.
  */
 export function formatSelectedDays(set: Set<number>): string {
-  if (set.size === 0) return "";
-  const sorted = [...set].sort((a, b) => a - b);
-  const runs: string[] = [];
-  let runStart = sorted[0];
-  let runEnd = sorted[0];
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] === runEnd + 1) {
-      runEnd = sorted[i];
-    } else {
-      runs.push(runStart === runEnd ? `${runStart}` : `${runStart}–${runEnd}`);
-      runStart = sorted[i];
-      runEnd = sorted[i];
-    }
-  }
-  runs.push(runStart === runEnd ? `${runStart}` : `${runStart}–${runEnd}`);
-  return runs.join(", ");
+  return formatRuns(set);
 }

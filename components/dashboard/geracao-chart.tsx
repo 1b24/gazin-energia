@@ -18,8 +18,7 @@ interface Point {
   metaKwh: number;
 }
 
-const fmtKwh = (n: number) =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+import { fmtCompact } from "@/lib/format";
 
 export function GeracaoChart({ data }: { data: Point[] }) {
   return (
@@ -33,11 +32,11 @@ export function GeracaoChart({ data }: { data: Point[] }) {
           <XAxis dataKey="label" tick={{ fontSize: 11 }} />
           <YAxis
             tick={{ fontSize: 11 }}
-            tickFormatter={(v) => fmtKwh(Number(v))}
+            tickFormatter={(v) => fmtCompact(Number(v))}
             width={70}
           />
           <Tooltip
-            formatter={(v) => [`${fmtKwh(Number(v))} kWh`, ""]}
+            formatter={(v) => [`${fmtCompact(Number(v))} kWh`, ""]}
             labelStyle={{ color: "hsl(var(--foreground))", fontSize: 12 }}
             itemStyle={{ color: "hsl(var(--foreground))", fontSize: 12 }}
             contentStyle={{

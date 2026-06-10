@@ -13,7 +13,6 @@
  */
 import { auth } from "@/lib/auth";
 import { scopedPrisma } from "@/lib/db";
-import { MESES_PT } from "@/lib/period";
 
 export async function getDb(filialFilter?: string) {
   const session = await auth();
@@ -51,39 +50,15 @@ export function scopeWhere(
   return where;
 }
 
-export function sumDias(
-  dias: { kwh: { toNumber(): number } | number | null }[],
-): number {
-  return dias.reduce((a, d) => {
-    if (d.kwh == null) return a;
-    const n = typeof d.kwh === "number" ? d.kwh : d.kwh.toNumber();
-    return a + n;
-  }, 0);
-}
-
-export function decimalToNumber(
-  v: { toNumber(): number } | number | null | undefined,
-): number {
-  if (v == null) return 0;
-  return typeof v === "number" ? v : v.toNumber();
-}
-
-export function diasNoMes(
-  ano: number | null | undefined,
-  mes: string | null | undefined,
-) {
-  const mesIdx = (MESES_PT as readonly string[]).indexOf(mes ?? "");
-  if (ano == null || mesIdx < 0) return 31;
-  return new Date(ano, mesIdx + 1, 0).getDate();
-}
-
-export function metaMensalGeracao(
-  metaDiaria: { toNumber(): number } | number | null | undefined,
-  ano: number | null | undefined,
-  mes: string | null | undefined,
-): number {
-  return decimalToNumber(metaDiaria) * diasNoMes(ano, mes);
-}
+// Helpers puros de kWh/período moveram pra `lib/kwh.ts` (módulo sem auth —
+// reusável por client components e testável sem mock). Re-export preserva
+// os imports existentes das agregações.
+export {
+  decimalToNumber,
+  diasNoMes,
+  metaMensalGeracao,
+  sumDias,
+} from "@/lib/kwh";
 
 export function concessionariaNome(row: {
   fornecedor?: { nome: string | null } | null;

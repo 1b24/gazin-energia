@@ -10,12 +10,14 @@
 import type { Row } from "@tanstack/react-table";
 import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 
-const fmtPct = (n: number | null) =>
+// Formatters COM SINAL ("+12,3%") — semântica de delta, sem equivalente em
+// lib/format.ts (fmtPct central não prefixa o sinal positivo).
+const fmtSignedPct = (n: number | null) =>
   n == null
     ? "—"
     : `${n >= 0 ? "+" : ""}${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 
-const fmtAbs = (n: number | null, unidade: string) =>
+const fmtSignedAbs = (n: number | null, unidade: string) =>
   n == null
     ? ""
     : `${n >= 0 ? "+" : ""}${n.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} ${unidade}`;
@@ -57,11 +59,11 @@ export function VariacaoCell({
     <div className={`flex flex-col items-end leading-tight ${color}`}>
       <span className="inline-flex items-center gap-1 text-xs font-semibold">
         <Icon className="h-3 w-3" />
-        {fmtPct(pct)}
+        {fmtSignedPct(pct)}
       </span>
       {abs != null && (
         <span className="text-[10px] text-muted-foreground">
-          {fmtAbs(abs, unidade)}
+          {fmtSignedAbs(abs, unidade)}
         </span>
       )}
     </div>

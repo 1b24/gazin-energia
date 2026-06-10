@@ -236,6 +236,16 @@ export function fmtBRL(n: number | null | undefined): string {
   });
 }
 
+/** Moeda BRL sem centavos — eixos de gráfico e KPIs grandes. Null → "—". */
+export function fmtBRLCompact(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return FMT_FALLBACK;
+  return n.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: 0,
+  });
+}
+
 /** Inteiro com separador de milhar, sem decimais. Null → "—". */
 export function fmtInt(n: number | null | undefined): string {
   if (!isFiniteNumber(n)) return FMT_FALLBACK;

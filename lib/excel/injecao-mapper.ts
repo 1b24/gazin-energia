@@ -15,6 +15,8 @@ import type { Serialized } from "@/lib/serialize";
 import type { Filial, Fornecedor, Injecao } from "@prisma/client";
 import { MESES_PT } from "@/lib/period";
 
+import { formatDecimal, parseDecimalFlexible } from "./common";
+
 /** Nome oficial das colunas — contrato export ↔ import. NÃO renomear. */
 export const INJECAO_EXCEL_COLUMNS = [
   "ID",
@@ -97,13 +99,6 @@ export function injecaoToExcelRow(
     "Valor 1 (R$)": formatDecimal(i.valor1),
     "Valor 2 (R$)": formatDecimal(i.valor2),
   };
-}
-
-function formatDecimal(v: unknown): string | null {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  return n.toFixed(2);
 }
 
 // ----------------------------------------------------------------------------
@@ -277,27 +272,5 @@ function pickString(
   return s === "" ? null : s;
 }
 
-/** Mesma heurística do consumo-mapper. */
-export function parseDecimalFlexible(v: unknown): number {
-  if (typeof v === "number") return v;
-  if (v == null) return Number.NaN;
-
-  const raw = String(v).trim().replace(/\s/g, "").replace(/R\$/i, "");
-  if (raw === "") return Number.NaN;
-
-  const hasComma = raw.includes(",");
-  const hasDot = raw.includes(".");
-  let normalized = raw;
-
-  if (hasComma && hasDot) {
-    const commaIsDecimal = raw.lastIndexOf(",") > raw.lastIndexOf(".");
-    normalized = commaIsDecimal
-      ? raw.replace(/\./g, "").replace(",", ".")
-      : raw.replace(/,/g, "");
-  } else if (hasComma) {
-    normalized = raw.replace(",", ".");
-  }
-
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return Number.NaN;
-  return Number(normalized);
-}
+// Re-export — API pública preservada; implementação agora em ./common.
+export { parseDecimalFlexible } from "./common";

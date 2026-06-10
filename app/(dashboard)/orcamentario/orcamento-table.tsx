@@ -7,6 +7,7 @@ import { Paperclip } from "lucide-react";
 import { DetailField } from "@/components/data-table/entity-drawer";
 import { EntityPage } from "@/components/data-table/entity-page";
 import { Badge } from "@/components/ui/badge";
+import { fmtBRL } from "@/lib/format";
 import type { UsinaOption } from "@/lib/schemas/geracao";
 import {
   ORCAMENTO_TIPO_LABEL,
@@ -20,14 +21,6 @@ import * as actions from "./actions";
 export type OrcamentoRow = Serialized<Orcamento> & {
   usina: Pick<Usina, "id" | "nome"> | null;
 };
-
-const fmtBRL = (n: number | null | undefined) =>
-  n == null
-    ? "—"
-    : n.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      });
 
 function FileLink({ url }: { url: string | null | undefined }) {
   if (!url) return <span className="text-muted-foreground">—</span>;

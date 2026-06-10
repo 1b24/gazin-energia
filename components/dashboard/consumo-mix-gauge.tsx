@@ -19,15 +19,10 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+import { fmtCompact, fmtPct } from "@/lib/format";
+
 const PROPRIA = "#10b981"; // emerald-500
 const CONTRATADA = "#3b82f6"; // blue-500
-
-const fmtKwh = (n: number) =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-const fmtPct = (n: number | null) =>
-  n == null
-    ? "—"
-    : `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 
 interface GaugeProps {
   label: string;
@@ -75,7 +70,7 @@ function Gauge({ label, kwh, pct, color }: GaugeProps) {
         </div>
       </div>
       <span className="mt-1 text-sm font-medium">{label}</span>
-      <span className="text-xs text-muted-foreground">{fmtKwh(kwh)} kWh</span>
+      <span className="text-xs text-muted-foreground">{fmtCompact(kwh)} kWh</span>
     </div>
   );
 }
@@ -128,7 +123,7 @@ export function ConsumoMixGauge({
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Consumo total (base)</span>
           <span className="font-mono font-medium">
-            {fmtKwh(consumoTotalKwh)} kWh
+            {fmtCompact(consumoTotalKwh)} kWh
           </span>
         </div>
         <div className="mt-1.5 flex items-center justify-between">
@@ -137,7 +132,7 @@ export function ConsumoMixGauge({
             Distribuidora (cativo)
           </span>
           <span className="font-mono">
-            {fmtKwh(distribuidoraKwh)} kWh · {fmtPct(pctDistribuidora)}
+            {fmtCompact(distribuidoraKwh)} kWh · {fmtPct(pctDistribuidora)}
           </span>
         </div>
       </div>

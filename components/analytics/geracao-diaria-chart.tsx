@@ -25,6 +25,9 @@ import {
   YAxis,
 } from "recharts";
 
+import { fmtCompact } from "@/lib/format";
+import { groupRuns } from "@/lib/runs";
+
 export interface DailySeries {
   /** Chave estável pra React key (ex: "2026-01"). */
   key: string;
@@ -50,9 +53,6 @@ const SERIES_COLORS = [
   "#ef4444", // red-500
   "#a855f7", // purple-500
 ];
-
-const fmtKwh = (n: number) =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 
 export function GeracaoDiariaChart({
   series,
@@ -105,22 +105,7 @@ export function GeracaoDiariaChart({
 
   // Agrupa dias selecionados em runs contíguos pra renderizar menos
   // ReferenceAreas — visualmente uma única faixa pra "dias 8-12".
-  const daysSorted = [...selectedDays].sort((a, b) => a - b);
-  const selectedRuns: Array<{ from: number; to: number }> = [];
-  if (daysSorted.length > 0) {
-    let runStart = daysSorted[0];
-    let runEnd = daysSorted[0];
-    for (let i = 1; i < daysSorted.length; i++) {
-      if (daysSorted[i] === runEnd + 1) {
-        runEnd = daysSorted[i];
-      } else {
-        selectedRuns.push({ from: runStart, to: runEnd });
-        runStart = daysSorted[i];
-        runEnd = daysSorted[i];
-      }
-    }
-    selectedRuns.push({ from: runStart, to: runEnd });
-  }
+  const selectedRuns = groupRuns(selectedDays);
 
   return (
     <div className="flex flex-col gap-3">
@@ -146,11 +131,11 @@ export function GeracaoDiariaChart({
             />
             <YAxis
               tick={{ fontSize: 11 }}
-              tickFormatter={(v) => fmtKwh(Number(v))}
+              tickFormatter={(v) => fmtCompact(Number(v))}
               width={70}
             />
             <Tooltip
-              formatter={(v) => [`${fmtKwh(Number(v))} kWh`, ""]}
+              formatter={(v) => [`${fmtCompact(Number(v))} kWh`, ""]}
               labelFormatter={(label) => `Dia ${label}`}
               contentStyle={{
                 backgroundColor: "hsl(var(--popover))",
@@ -213,7 +198,7 @@ export function GeracaoDiariaChart({
                 />
                 {t.label}
               </span>
-              <span className="font-mono">{fmtKwh(t.total)} kWh</span>
+              <span className="font-mono">{fmtCompact(t.total)} kWh</span>
             </div>
           ))}
         </div>

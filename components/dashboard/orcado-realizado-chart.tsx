@@ -11,18 +11,13 @@ import {
   YAxis,
 } from "recharts";
 
+import { fmtBRLCompact } from "@/lib/format";
+
 interface Point {
   mes: string;
   orcadoReais: number;
   realizadoReais: number;
 }
-
-const fmtBRL = (n: number) =>
-  n.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    maximumFractionDigits: 0,
-  });
 
 export function OrcadoRealizadoChart({ data }: { data: Point[] }) {
   if (data.length === 0) {
@@ -51,14 +46,14 @@ export function OrcadoRealizadoChart({ data }: { data: Point[] }) {
           />
           <YAxis
             tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-            tickFormatter={(v) => fmtBRL(Number(v))}
+            tickFormatter={(v) => fmtBRLCompact(Number(v))}
             tickLine={{ stroke: "var(--border)" }}
             axisLine={{ stroke: "var(--border)" }}
             width={90}
           />
           <Tooltip
             cursor={{ fill: "var(--dashboard-chart-hover)" }}
-            formatter={(v) => [fmtBRL(Number(v)), ""]}
+            formatter={(v) => [fmtBRLCompact(Number(v)), ""]}
             labelStyle={{
               color: "var(--popover-foreground)",
               fontSize: 12,

@@ -18,6 +18,8 @@ import type { Serialized } from "@/lib/serialize";
 import type { Consumo, Filial } from "@prisma/client";
 import { MESES_PT } from "@/lib/period";
 
+import { formatDecimal, parseDecimalFlexible } from "./common";
+
 /** Nome oficial das colunas — contrato export ↔ import. NÃO renomear. */
 export const CONSUMO_EXCEL_COLUMNS = [
   "ID",
@@ -116,13 +118,6 @@ export function consumoToExcelRow(
 }
 
 /** Decimal → string com ponto (`1234.56`). null/undefined → null. */
-function formatDecimal(v: unknown): string | null {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  return n.toFixed(2);
-}
-
 // ----------------------------------------------------------------------------
 // Import — validação de headers e parse por linha
 // ----------------------------------------------------------------------------
@@ -316,32 +311,5 @@ function pickString(
   return s === "" ? null : s;
 }
 
-/**
- * Parser decimal flexível — aceita ponto OU vírgula como separador decimal,
- * com fallback inteligente quando ambos aparecem. Igual ao
- * `parseDecimalPercent` do filial-mapper mas sem o `%`.
- */
-export function parseDecimalFlexible(v: unknown): number {
-  if (typeof v === "number") return v;
-  if (v == null) return Number.NaN;
-
-  const raw = String(v).trim().replace(/\s/g, "").replace(/R\$/i, "");
-  if (raw === "") return Number.NaN;
-
-  const hasComma = raw.includes(",");
-  const hasDot = raw.includes(".");
-  let normalized = raw;
-
-  if (hasComma && hasDot) {
-    // Último separador é o decimal (BR: 1.234,56 | US: 1,234.56)
-    const commaIsDecimal = raw.lastIndexOf(",") > raw.lastIndexOf(".");
-    normalized = commaIsDecimal
-      ? raw.replace(/\./g, "").replace(",", ".")
-      : raw.replace(/,/g, "");
-  } else if (hasComma) {
-    normalized = raw.replace(",", ".");
-  }
-
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return Number.NaN;
-  return Number(normalized);
-}
+// Re-export — API pública preservada; implementação agora em ./common.
+export { parseDecimalFlexible } from "./common";
