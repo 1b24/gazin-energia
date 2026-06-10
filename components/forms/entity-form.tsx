@@ -217,14 +217,14 @@ export function EntityForm<S extends z.ZodObject>({
     // engasgando — rodamos schema.safeParse direto pra extrair o erro real.
     if (typeof window !== "undefined") {
       const values = getValues();
-      // eslint-disable-next-line no-console
+       
       console.error("[entity-form] validation failed:", errs);
-      // eslint-disable-next-line no-console
+       
       console.error("[entity-form] values at failure:", values);
       const parsed = (
         schema as unknown as { safeParse: (v: unknown) => unknown }
       ).safeParse(values) as { success: boolean; error?: unknown };
-      // eslint-disable-next-line no-console
+       
       console.error("[entity-form] direct schema.safeParse:", parsed);
       if (!parsed.success) {
         setSubmitError(
