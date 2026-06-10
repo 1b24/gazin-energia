@@ -94,7 +94,9 @@ invioláveis durante o ciclo.
 
 Histórico de refactors concluídos vive em `docs/refactors/done/`.
 
-Atual: _nenhum refactor ativo_.
+Atual: `2026-06-server-pagination.md` — **planejado, nenhum step iniciado**
+(paginação server-side nas entidades grandes; ler o brief antes de tocar em
+`EntityPage`/`DataTable`/pages de Consumo, Injeção ou Geração).
 
 ## 5. Convenções técnicas
 
