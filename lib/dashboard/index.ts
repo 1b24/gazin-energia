@@ -51,8 +51,14 @@ export {
   type ConcessionariaRow,
 } from "./injection";
 
-// Composição do consumo — geração própria × contratada × distribuidora
-export { getConsumoMix, type ConsumoMix } from "./energy-mix";
+// Composição do consumo — geração própria × contratada × distribuidora.
+// `computeConsumoMix` é puro e reusa os agregados do getKpis (evita queries
+// duplicadas); só a contratada tem query própria.
+export {
+  computeConsumoMix,
+  getGeracaoContratadaKwh,
+  type ConsumoMix,
+} from "./energy-mix";
 
 // Opções dos dropdowns de filtro
 export {

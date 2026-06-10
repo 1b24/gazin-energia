@@ -33,6 +33,9 @@ export async function getKpis(
   const p = period ?? getCurrentPeriod();
 
   // Geração: filtra por mes pt-BR, agrega kWh dos dias, soma metas.
+  // NÃO converter pra `db.geracaoDia.aggregate`: GeracaoDia está fora do
+  // MODEL_SCOPE (lib/db.ts) — agregar pelo filho burlaria o escopo de
+  // gestor_filial. A query precisa entrar pelo model escopado (Geracao).
   const geracoes = await retryClosedConnection(() =>
     db.geracao.findMany({
       where: {
@@ -60,47 +63,37 @@ export async function getKpis(
   const geracaoPctAtingido =
     geracaoMetaKwh > 0 ? (geracaoRealizadaKwh / geracaoMetaKwh) * 100 : null;
 
-  // Faturamento de venda — VendaKwh usa "01".."12".
-  const vendas = await retryClosedConnection(() =>
-    db.vendaKwh.findMany({
+  // Faturamento de venda — VendaKwh usa "01".."12". Soma no banco
+  // (`aggregate`) em vez de puxar as rows: o extension de escopo cobre
+  // aggregate (lib/db.ts), então RBAC segue aplicado.
+  const vendasAgg = await retryClosedConnection(() =>
+    db.vendaKwh.aggregate({
       where: {
         ano: p.ano,
         mes: p.mesNum,
         deletedAt: null,
         ...scopeWhere("usina", filialFilter, ufFilter),
       },
-      select: { valorReais: true },
+      _sum: { valorReais: true },
     }),
   );
-  const faturamentoVendaReais = vendas.reduce(
-    (acc, v) => acc + decimalToNumber(v.valorReais),
-    0,
-  );
+  const faturamentoVendaReais = decimalToNumber(vendasAgg._sum.valorReais);
 
-  // Consumo total do mês.
-  const consumos = await retryClosedConnection(() =>
-    db.consumo.findMany({
+  // Consumo total do mês — 3 somas em uma só ida ao banco.
+  const consumoAgg = await retryClosedConnection(() =>
+    db.consumo.aggregate({
       where: {
         ano: p.ano,
         mes: p.mesPt,
         deletedAt: null,
         ...scopeWhere("filial", filialFilter, ufFilter),
       },
-      select: { consumoTotal: true, consumoKwhP: true, consumoKwhFp: true },
+      _sum: { consumoTotal: true, consumoKwhP: true, consumoKwhFp: true },
     }),
   );
-  const consumoTotalKwh = consumos.reduce(
-    (acc, c) => acc + decimalToNumber(c.consumoTotal),
-    0,
-  );
-  const consumoPontaKwh = consumos.reduce(
-    (acc, c) => acc + decimalToNumber(c.consumoKwhP),
-    0,
-  );
-  const consumoForaPontaKwh = consumos.reduce(
-    (acc, c) => acc + decimalToNumber(c.consumoKwhFp),
-    0,
-  );
+  const consumoTotalKwh = decimalToNumber(consumoAgg._sum.consumoTotal);
+  const consumoPontaKwh = decimalToNumber(consumoAgg._sum.consumoKwhP);
+  const consumoForaPontaKwh = decimalToNumber(consumoAgg._sum.consumoKwhFp);
 
   // Usinas operacionais — não-deletadas, status = "operacional".
   const usinasOperacionais = await retryClosedConnection(() =>

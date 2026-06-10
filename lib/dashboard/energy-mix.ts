@@ -23,11 +23,19 @@
  * (própria = injeção recebida da fatura, com/sem subtrair terceiros) foi
  * avaliada e rejeitada por não distinguir a injeção das usinas próprias da
  * injeção de terceiros/distribuidora.
+ *
+ * Arquitetura: consumo total e geração própria são EXATAMENTE os agregados
+ * que `getKpis` já computa (mesmos where/escopo) — repetir as queries aqui
+ * duplicava 2 idas ao banco por render do dashboard. Por isso o mix é
+ * composto em duas partes:
+ *  - `getGeracaoContratadaKwh` — a única query que o mix tem de exclusivo.
+ *  - `computeConsumoMix` — função PURA que monta o mix a partir dos números
+ *    do `getKpis` + contratada. Testável sem banco.
  */
 import { retryClosedConnection } from "@/lib/db";
 import { getCurrentPeriod, type CurrentPeriod } from "@/lib/period";
 
-import { decimalToNumber, getDb, scopeWhere, sumDias } from "./scope";
+import { decimalToNumber, getDb, scopeWhere } from "./scope";
 
 export interface ConsumoMix {
   consumoTotalKwh: number;
@@ -42,64 +50,44 @@ export interface ConsumoMix {
   pctDistribuidora: number | null;
 }
 
-export async function getConsumoMix(
+/**
+ * Σ `Injecao.consumoTotalKwh` do período — injeção contratada de terceiros.
+ * Soma no banco; `Injecao` está no MODEL_SCOPE e o extension cobre
+ * `aggregate`, então RBAC segue aplicado.
+ */
+export async function getGeracaoContratadaKwh(
   filialFilter?: string,
   period?: CurrentPeriod,
   ufFilter?: string,
-): Promise<ConsumoMix> {
+): Promise<number> {
   const { db } = await getDb(filialFilter);
   const p = period ?? getCurrentPeriod();
 
-  // Consumo total (denominador) — Consumo liga via filial.
-  const consumos = await retryClosedConnection(() =>
-    db.consumo.findMany({
+  const agg = await retryClosedConnection(() =>
+    db.injecao.aggregate({
       where: {
         ano: p.ano,
         mes: p.mesPt,
         deletedAt: null,
         ...scopeWhere("filial", filialFilter, ufFilter),
       },
-      select: { consumoTotal: true },
+      _sum: { consumoTotalKwh: true },
     }),
   );
-  const consumoTotalKwh = consumos.reduce(
-    (acc, c) => acc + decimalToNumber(c.consumoTotal),
-    0,
-  );
+  return decimalToNumber(agg._sum.consumoTotalKwh);
+}
 
-  // Geração própria — usinas Gazin; Geracao liga via usina.
-  const geracoes = await retryClosedConnection(() =>
-    db.geracao.findMany({
-      where: {
-        ano: p.ano,
-        mes: p.mesPt,
-        deletedAt: null,
-        ...scopeWhere("usina", filialFilter, ufFilter),
-      },
-      select: { dias: { select: { kwh: true } } },
-    }),
-  );
-  const geracaoPropriaKwh = geracoes.reduce(
-    (acc, g) => acc + sumDias(g.dias),
-    0,
-  );
-
-  // Geração contratada — injeção de terceiros; Injecao liga via filial.
-  const injecoes = await retryClosedConnection(() =>
-    db.injecao.findMany({
-      where: {
-        ano: p.ano,
-        mes: p.mesPt,
-        deletedAt: null,
-        ...scopeWhere("filial", filialFilter, ufFilter),
-      },
-      select: { consumoTotalKwh: true },
-    }),
-  );
-  const geracaoContratadaKwh = injecoes.reduce(
-    (acc, i) => acc + decimalToNumber(i.consumoTotalKwh),
-    0,
-  );
+/**
+ * Compõe o mix a partir de agregados já computados — `consumoTotalKwh` e
+ * `geracaoPropriaKwh` vêm do `getKpis` (`consumoTotalKwh` /
+ * `geracaoRealizadaKwh`); `geracaoContratadaKwh` de `getGeracaoContratadaKwh`.
+ */
+export function computeConsumoMix(input: {
+  consumoTotalKwh: number;
+  geracaoPropriaKwh: number;
+  geracaoContratadaKwh: number;
+}): ConsumoMix {
+  const { consumoTotalKwh, geracaoPropriaKwh, geracaoContratadaKwh } = input;
 
   const cobertoKwh = geracaoPropriaKwh + geracaoContratadaKwh;
   // Clamp em 0: geração pode exceder consumo numa fatia (UC supridora).

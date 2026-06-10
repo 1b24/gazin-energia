@@ -29,11 +29,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { auth } from "@/lib/auth";
 import {
+  computeConsumoMix,
   getAlerts,
   getAtencao,
   getConcessionariaOptions,
-  getConsumoMix,
   getFilialOptions,
+  getGeracaoContratadaKwh,
   getGeracaoSerie,
   getInjecaoPorConcessionaria,
   getKpis,
@@ -43,16 +44,9 @@ import {
   getYearOptions,
   periodFromQuery,
 } from "@/lib/dashboard";
+import { fmtBRL, fmtCompact, fmtPct } from "@/lib/format";
 import { serializePrisma } from "@/lib/serialize";
 
-const fmtKwh = (n: number) =>
-  n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-const fmtBRL = (n: number) =>
-  n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const fmtPct = (n: number | null) =>
-  n == null
-    ? "—"
-    : `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 
 export default async function DashboardHomePage({
   searchParams,
@@ -80,7 +74,7 @@ export default async function DashboardHomePage({
   // para o da query mais lenta (antes: ~12 awaits sequenciais, 2-4s).
   const [
     kpis,
-    consumoMix,
+    geracaoContratadaKwh,
     alerts,
     serieRaw,
     atencaoRaw,
@@ -93,7 +87,7 @@ export default async function DashboardHomePage({
     concessionariaOptions,
   ] = await Promise.all([
     getKpis(filialFilter, period, ufFilter),
-    getConsumoMix(filialFilter, period, ufFilter),
+    getGeracaoContratadaKwh(filialFilter, period, ufFilter),
     getAlerts(filialFilter, ufFilter),
     getGeracaoSerie(filialFilter, period, ufFilter),
     getAtencao(filialFilter, period, ufFilter, concessionariaFilter),
@@ -110,6 +104,14 @@ export default async function DashboardHomePage({
     getUfOptions(filialFilter),
     getConcessionariaOptions(filialFilter),
   ]);
+
+  // Mix composto dos agregados do getKpis (mesmos where/escopo) + contratada —
+  // evita repetir as queries de consumo e geração só pra somar de novo.
+  const consumoMix = computeConsumoMix({
+    consumoTotalKwh: kpis.consumoTotalKwh,
+    geracaoPropriaKwh: kpis.geracaoRealizadaKwh,
+    geracaoContratadaKwh,
+  });
 
   const serie = serializePrisma(serieRaw) as typeof serieRaw;
   const orcadoRealizado = serializePrisma(
@@ -156,10 +158,10 @@ export default async function DashboardHomePage({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Geração realizada"
-          value={`${fmtKwh(kpis.geracaoRealizadaKwh)} kWh`}
+          value={`${fmtCompact(kpis.geracaoRealizadaKwh)} kWh`}
           subtitle={
             <span>
-              Meta: {fmtKwh(kpis.geracaoMetaKwh)} kWh ·{" "}
+              Meta: {fmtCompact(kpis.geracaoMetaKwh)} kWh ·{" "}
               <strong>{fmtPct(kpis.geracaoPctAtingido)}</strong>
             </span>
           }
@@ -174,11 +176,11 @@ export default async function DashboardHomePage({
         />
         <KpiCard
           label="Consumo total"
-          value={`${fmtKwh(kpis.consumoTotalKwh)} kWh`}
+          value={`${fmtCompact(kpis.consumoTotalKwh)} kWh`}
           subtitle={
             <span>
-              P: <strong>{fmtKwh(kpis.consumoPontaKwh)}</strong> · FP:{" "}
-              <strong>{fmtKwh(kpis.consumoForaPontaKwh)}</strong> kWh
+              P: <strong>{fmtCompact(kpis.consumoPontaKwh)}</strong> · FP:{" "}
+              <strong>{fmtCompact(kpis.consumoForaPontaKwh)}</strong> kWh
             </span>
           }
           icon={<Plug className="h-4 w-4" />}
@@ -257,10 +259,10 @@ export default async function DashboardHomePage({
                           {c.ucs}
                         </td>
                         <td className="px-3 py-1.5 text-right">
-                          {fmtKwh(c.injetadoKwh)}
+                          {fmtCompact(c.injetadoKwh)}
                         </td>
                         <td className="px-3 py-1.5 text-right text-muted-foreground">
-                          {fmtKwh(c.consumoKwh)}
+                          {fmtCompact(c.consumoKwh)}
                         </td>
                         <td className="px-3 py-1.5 text-right">
                           <Badge
@@ -350,10 +352,10 @@ export default async function DashboardHomePage({
                       <tr key={`${r.usinaId ?? "-"}-${i}`} className="border-t">
                         <td className="px-3 py-1.5">{r.usinaNome}</td>
                         <td className="px-3 py-1.5 text-right">
-                          {fmtKwh(r.realizadoKwh)}
+                          {fmtCompact(r.realizadoKwh)}
                         </td>
                         <td className="px-3 py-1.5 text-right text-muted-foreground">
-                          {fmtKwh(r.metaKwh)}
+                          {fmtCompact(r.metaKwh)}
                         </td>
                         <td className="px-3 py-1.5 text-right">
                           <Badge
